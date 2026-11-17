@@ -1,0 +1,108 @@
+# controla-ai-parser
+
+Turns a spoken or typed expense into a validated record:
+
+```
+"gasté 180 en hamburguesas en efectivo"
+        ↓
+{ amount: 18000, category: "Food", payment_method: "Cash", description: "Hamburguesas" }
+```
+
+This is the AI core of **Controla**, a personal finance app I'm building where you tap a home-screen widget, say what you spent, and it's logged. The app itself is private; this module is extracted so the interesting part can be read, run and tested on its own.
+
+Controla is also my hands-on lab for AI engineering. Each concept I learn (structured output, validation, evals, and next tool calling and on-device models) gets shipped here instead of staying in a tutorial.
+
+## Pipeline
+
+```
+audio ──► audio guard ──► Whisper ──► transcript guard ──► GPT-4o-mini ──► JSON.parse ──► Zod ──► cents ──► store
+          (< 0.8 s?)                  (empty? known                        (not JSON?)     (closed     (integer
+                                       hallucination?)                                      schema)     money)
+```
+
+Every arrow can say **no**. A rejection is a normal result with a reason, not an exception:
+
+```ts
+type ParseResult =
+  | { ok: true; movement: Movement }
+  | { ok: false; reason: 'audio_too_short' | 'empty_transcript' | 'known_hallucination' | 'too_short'
+                       | 'invalid_json' | 'schema_violation' | 'not_an_expense'; detail?: string };
+```
+
+## The bug that shaped this
+
+In real use, my expense list started showing entries like **"Subtítulos en Amara"**. Nobody said that. When Whisper receives silence or a very short accidental recording, it sometimes "hears" text from its training data, typically subtitle credits like *"Subtítulos realizados por la comunidad de Amara.org"*. The parser then did exactly what it was told and turned that into an expense.
+
+The fix is three layers, cheapest first:
+
+1. **Guards before the LLM** ([`src/guards.ts`](src/guards.ts)): reject clips under 0.8 s, empty or punctuation-only transcripts, and known hallucination phrases. These are deterministic, free and run before any paid model call.
+2. **A legitimate way to say no**: the schema now has `is_expense: false`. Before, the model's only valid output was an expense, so it invented one. Now greetings, mic tests, questions and income get rejected by the model itself.
+3. **Eval cases** for each of these, so the bug can't come back silently when the prompt or model changes.
+
+## Design decisions
+
+| Decision | Why |
+|---|---|
+| **Treat model output as untrusted input** | It must parse as JSON, match a closed Zod schema (fixed category and payment enums, non-negative amount) and claim to be an expense before anything is stored. Anything off-contract is rejected with a reason instead of writing bad data. |
+| **Money as integer cents** | `19.99 * 100` is `1998.9999…` in floating point. Rounding once at the boundary keeps every stored amount exact. |
+| **`temperature: 0` + `response_format: json_object`** | Same input, same record. JSON mode removes a whole class of "Sure! Here's your JSON:" failures. |
+| **Model behind a `Completer` function** | `(system, user) => Promise<string>`. Tests use a fake, so they run offline in milliseconds, and swapping models doesn't touch parsing. |
+| **Defaults instead of follow-up questions** | No payment method → `Cash`; unclear category → `Other`. Logging has to take seconds, so the record is saved and can be corrected later. |
+| **AI stays on the server** | In Controla the app only sends audio or text. Keys never ship in the bundle and the model can change without an app release. |
+
+## Evals
+
+[`evals/cases.json`](evals/cases.json) holds 30 cases in Spanish and English, tagged by what they test:
+
+| Tag | What it checks | Example |
+|---|---|---|
+| `words` | Amounts written as words | "veinticinco pesos de camión" → 2500 |
+| `decimals`, `format` | Decimals and thousands separators | "zapatos 1,299 a meses…" → 129900 |
+| `defaults` | Missing payment method falls back to Cash | "tacos 300" |
+| `inference`, `tricky` | Category from context, brand traps | "ida a la playa 500" → Transport; "uber eats 230" → Food |
+| `ambiguous` | Cases where a human could disagree | "gas for the car" vs "recibo del gas" |
+| `hallucination` | Whisper subtitle artifacts | "Subtítulos realizados por la comunidad de Amara.org" |
+| `not-expense` | Text that must not become a record | "hola, probando, probando", "me pagaron 5000" |
+
+```bash
+cp .env.example .env   # add OPENAI_API_KEY
+npm run eval                                    # gpt-4o-mini, fails under 90%
+npm run eval -- --model gpt-4.1-mini --min 0.95  # compare another model
+```
+
+Each run prints pass/fail per case with the exact field that was wrong, a pass rate per tag, and saves the full result to `evals/results/` so runs can be compared before and after a prompt change. The `ambiguous` cases are there on purpose: they document the decision I made, and if a model disagrees I want to see it, not hide it.
+
+## Tests
+
+```bash
+npm install
+npm test        # 34 tests, offline, no API key needed
+```
+
+Covers the guards (every known hallucination, empty input, accidental taps), every rejection path in the parser (non-JSON, unknown category, negative amount, `is_expense: false`, guard short-circuits without calling the model), cents rounding, and the eval set's own integrity.
+
+## Use
+
+```ts
+import { transcribe, parseSpend, openAICompleter } from 'controla-ai-parser';
+
+const heard = await transcribe(audioBuffer, { durationMs: 2400, language: 'es' });
+if (!heard.ok) return heard; // e.g. { ok: false, reason: 'audio_too_short' }
+
+const result = await parseSpend(heard.text, openAICompleter());
+if (result.ok) await save(result.movement);
+```
+
+## Next
+
+- Run the eval set on every prompt change in CI (needs an API key secret).
+- An LLM-as-judge check for the free-text `description`, which exact matching can't score.
+- Compare an on-device model for the parsing step, so simple expenses work offline.
+
+## Stack
+
+TypeScript · OpenAI (Whisper, GPT-4o-mini) · Zod · Vitest · Node 20+
+
+---
+
+MIT © Adrián Lizárraga Scott · [Portfolio](https://adrianlscott.github.io)
