@@ -1,19 +1,33 @@
 import OpenAI, { toFile } from 'openai';
 import { checkAudio, type GuardResult } from './guards.js';
 
+/**
+ * Transcription model used when none is given. `gpt-4o-mini-transcribe` is cheaper than `whisper-1`
+ * (about $0.003 vs $0.006 per minute) and `whisper-1` is being retired.
+ */
+export const DEFAULT_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe';
+
+
 export interface TranscribeOptions {
   client?: OpenAI;
-  /** Length of the recording; very short clips are rejected before calling Whisper. */
+  /** OpenAI transcription model (default {@link DEFAULT_TRANSCRIBE_MODEL}). */
+  model?: string;
+  /**
+   * Optional vocabulary/context hint for the model, e.g. brand names it tends to mishear. None by default:
+   * on silent audio the model can echo the hint back as the transcript.
+   */
+  prompt?: string;
+  /** Length of the recording; very short clips are rejected before calling the model. */
   durationMs?: number;
-  /** ISO-639-1 hint ("es", "en"). Omit to let Whisper auto-detect. */
+  /** ISO-639-1 hint ("es", "en"). Omit to let the model auto-detect. */
   language?: string;
-  /** Upload filename. Its extension tells Whisper the audio format (default `spend.m4a`). */
+  /** Upload filename. Its extension tells the model the audio format (default `spend.m4a`). */
   filename?: string;
   /** MIME type of the upload. Defaults to the type matching the filename's extension. */
   mimeType?: string;
 }
 
-/** Audio formats Whisper accepts, by file extension. */
+/** Audio formats the transcription API accepts, by file extension. */
 const MIME_TYPES: Record<string, string> = {
   m4a: 'audio/m4a',
   mp4: 'audio/mp4',
@@ -42,8 +56,9 @@ export async function transcribe(audio: Buffer, opts: TranscribeOptions = {}): P
   const filename = opts.filename ?? 'spend.m4a';
   const file = await toFile(audio, filename, { type: opts.mimeType ?? mimeTypeFor(filename) });
   const result = await client.audio.transcriptions.create({
-    model: 'whisper-1',
+    model: opts.model ?? DEFAULT_TRANSCRIBE_MODEL,
     file,
+    ...(opts.prompt ? { prompt: opts.prompt } : {}),
     ...(opts.language ? { language: opts.language } : {}),
   });
   return { ok: true, text: result.text };
