@@ -40,3 +40,50 @@ export function byTag(scores: CaseScore[]): Record<string, { pass: number; total
   }
   return out;
 }
+
+/** Fields whose confidence the eval can check against an expected value. */
+export const CHECKED_FIELDS = ['amount', 'category', 'payment_method'] as const;
+export type CheckedField = (typeof CHECKED_FIELDS)[number];
+
+export interface FieldInstance {
+  id: string;
+  field: CheckedField;
+  value: string;
+  p: number;
+  correct: boolean;
+}
+
+/** One entry per scored field of a parsed expense, with the model's probability and whether the value was right. */
+export function fieldInstances(c: EvalCase, result: ParseResult): FieldInstance[] {
+  if ('reject' in c.expect || !result.ok || !result.confidence) return [];
+  const want = c.expect;
+  const got = result.movement;
+  const out: FieldInstance[] = [];
+  for (const field of CHECKED_FIELDS) {
+    const p = result.confidence.fields[field]?.p;
+    if (p === undefined) continue;
+    out.push({ id: c.id, field, value: String(got[field]), p, correct: got[field] === want[field] });
+  }
+  return out;
+}
+
+export const THRESHOLDS = [0.5, 0.6, 0.7, 0.8, 0.9, 0.95] as const;
+
+/** For each threshold: how many correct fields it would flag (false alarms) and how many wrong ones (caught). */
+export function thresholdTable(instances: FieldInstance[]) {
+  const correct = instances.filter((i) => i.correct);
+  const wrong = instances.filter((i) => !i.correct);
+  return THRESHOLDS.map((t) => ({
+    threshold: t,
+    falseAlarms: correct.filter((i) => i.p < t).length,
+    correct: correct.length,
+    caught: wrong.filter((i) => i.p < t).length,
+    wrong: wrong.length,
+  }));
+}
+
+/** Highest threshold that flags at most `maxFalseAlarmRate` of the correct fields. */
+export function suggestThreshold(instances: FieldInstance[], maxFalseAlarmRate = 0.05): number | undefined {
+  const ok = thresholdTable(instances).filter((r) => r.correct > 0 && r.falseAlarms / r.correct <= maxFalseAlarmRate);
+  return ok.at(-1)?.threshold;
+}

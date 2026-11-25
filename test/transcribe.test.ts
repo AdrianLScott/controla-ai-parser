@@ -3,8 +3,8 @@ import type OpenAI from 'openai';
 import { DEFAULT_TRANSCRIBE_MODEL, mimeTypeFor, transcribe } from '../src/transcribe.js';
 
 /** A fake OpenAI client that records the uploaded file, so tests run offline. */
-function fakeClient(text = 'tacos 300') {
-  const create = vi.fn(async (_req: { file: File; model: string; prompt?: string }) => ({ text }));
+function fakeClient(text = 'tacos 300', logprobs?: { token?: string; logprob?: number; bytes?: number[] }[]) {
+  const create = vi.fn(async (_req: { file: File; model: string; prompt?: string; include?: string[] }) => ({ text, ...(logprobs ? { logprobs } : {}) }));
   const client = { audio: { transcriptions: { create } } } as unknown as OpenAI;
   return { client, create, uploaded: () => create.mock.calls[0]?.[0].file, model: () => create.mock.calls[0]?.[0].model, request: () => create.mock.calls[0]?.[0] };
 }
@@ -74,7 +74,24 @@ describe('transcribe', () => {
     expect(request()?.prompt).toBe('Uber Eats, Rappi');
   });
 
-  it('rejects a too-short clip without calling Whisper', async () => {
+  it('asks gpt-4o-mini-transcribe for logprobs and returns them', async () => {
+    const { client, request } = fakeClient('tacos 300', [{ token: 'tacos', logprob: -0.01, bytes: [116, 97, 99, 111, 115] }, { token: ' 300', logprob: -0.2 }]);
+    const result = await transcribe(audio, { client });
+    expect(request()?.include).toEqual(['logprobs']);
+    expect(result).toEqual({
+      ok: true,
+      text: 'tacos 300',
+      logprobs: [{ token: 'tacos', logprob: -0.01, bytes: [116, 97, 99, 111, 115] }, { token: ' 300', logprob: -0.2, bytes: null }],
+    });
+  });
+
+  it('does not ask whisper-1 for logprobs (unsupported)', async () => {
+    const { client, request } = fakeClient();
+    await transcribe(audio, { client, model: 'whisper-1' });
+    expect(request()).not.toHaveProperty('include');
+  });
+
+  it('rejects a too-short clip without calling the model', async () => {
     const { client, create } = fakeClient();
     const result = await transcribe(audio, { client, durationMs: 300 });
     expect(result).toEqual({ ok: false, reason: 'audio_too_short' });

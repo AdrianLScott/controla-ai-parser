@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseSpend, type Completer } from '../src/parse.js';
+import type OpenAI from 'openai';
+import type { TokenLogprob } from '../src/confidence.js';
+import { openAICompleter, parseSpend, type Completer } from '../src/parse.js';
 import { toCents } from '../src/schema.js';
 
 /** A fake model that always answers with `reply`, so tests run offline and deterministically. */
@@ -46,6 +48,103 @@ describe('parseSpend', () => {
       fakeModel({ is_expense: false, reason: 'microphone test' }),
     );
     expect(result).toEqual({ ok: false, reason: 'not_an_expense', detail: 'microphone test' });
+  });
+});
+
+/** Tokenizes `json` one value at a time, giving each listed value its probability (everything else p = 1). */
+function withLogprobs(output: Record<string, unknown>, p: Record<string, number>, top: TokenLogprob['top'] = undefined) {
+  const content = JSON.stringify(output);
+  const logprobs: TokenLogprob[] = [];
+  let rest = content;
+  for (const [key, value] of Object.entries(output)) {
+    const literal = typeof value === 'string' ? value : JSON.stringify(value);
+    const at = rest.indexOf(literal, rest.indexOf(`"${key}"`) + key.length + 2);
+    logprobs.push({ token: rest.slice(0, at), logprob: 0 });
+    logprobs.push({ token: literal, logprob: Math.log(p[key] ?? 1), ...(key === 'category' && top ? { top } : {}) });
+    rest = rest.slice(at + literal.length);
+  }
+  logprobs.push({ token: rest, logprob: 0 });
+  return vi.fn<Completer>(async () => ({ content, logprobs }));
+}
+
+describe('parseSpend confidence', () => {
+  const playa = { is_expense: true, amount: 500, category: 'Travel', payment_method: 'Cash', description: 'Ida a la playa' };
+
+  it('adds nothing when the completer returns a plain string', async () => {
+    const result = await parseSpend('ida a la playa 500', fakeModel(playa));
+    expect(result).not.toHaveProperty('confidence');
+    expect(result).not.toHaveProperty('needs_review');
+  });
+
+  it('returns per-field confidence and flags an unsure category', async () => {
+    const top = [{ token: 'Travel', logprob: Math.log(0.62) }, { token: 'Transport', logprob: Math.log(0.31) }];
+    const result = await parseSpend('ida a la playa 500', withLogprobs(playa, { category: 0.62, amount: 0.97 }, top));
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.confidence?.fields.category?.p).toBeCloseTo(0.62);
+    expect(result.confidence?.fields.category?.alternatives?.[0]?.value).toBe('Transport');
+    expect(result.confidence?.fields.amount?.p).toBeCloseTo(0.97);
+    expect(result.needs_review).toEqual(['category']);
+  });
+
+  it('flags nothing when the model is sure', async () => {
+    const result = await parseSpend('tacos 300', withLogprobs({ ...playa, category: 'Food', amount: 300 }, { category: 0.99 }));
+    expect(result).toMatchObject({ ok: true });
+    expect(result).not.toHaveProperty('needs_review');
+  });
+
+  it('respects per-field thresholds', async () => {
+    const result = await parseSpend('ida a la playa 500', withLogprobs(playa, { category: 0.62 }), { reviewBelow: { category: 0.5 } });
+    expect(result).not.toHaveProperty('needs_review');
+  });
+
+  it('never flags the description by default', async () => {
+    const result = await parseSpend('ida a la playa 500', withLogprobs(playa, { description: 0.1 }));
+    expect(result).not.toHaveProperty('needs_review');
+  });
+
+  it('always flags a missing amount', async () => {
+    const result = await parseSpend('spent some money on coffee', fakeModel({ ...playa, amount: 0, category: 'Food' }));
+    expect(result).toMatchObject({ ok: true, needs_review: ['amount'] });
+  });
+
+  it('flags the amount when the transcript is shaky and the amount was not heard as digits', async () => {
+    const transcript: TokenLogprob[] = [
+      { token: 'T', logprob: Math.log(0.9) },
+      { token: 'uve', logprob: Math.log(0.6) },
+      { token: ' lipis', logprob: Math.log(0.2) },
+      { token: ' doscientos treinta', logprob: Math.log(0.95) },
+    ];
+    const food = { ...playa, amount: 230, category: 'Food', description: 'Lipis' };
+    const result = await parseSpend('Tuve lipis doscientos treinta', withLogprobs(food, {}), { transcript });
+    expect(result).toMatchObject({ ok: true, transcript_uncertain: true, needs_review: ['amount'] });
+    if (result.ok) expect(result.confidence?.transcript?.uncertain.map((w) => w.text)).toEqual(['lipis']);
+  });
+
+  it('does not flag a clear transcript', async () => {
+    const transcript: TokenLogprob[] = [{ token: 'tacos', logprob: Math.log(0.98) }, { token: ' 300', logprob: Math.log(0.97) }];
+    const result = await parseSpend('tacos 300', withLogprobs({ ...playa, category: 'Food', amount: 300 }, {}), { transcript });
+    expect(result).toMatchObject({ ok: true, transcript_uncertain: false });
+    expect(result).not.toHaveProperty('needs_review');
+  });
+});
+
+describe('openAICompleter', () => {
+  it('asks for logprobs and returns them with the content', async () => {
+    const create = vi.fn(async (_req: Record<string, unknown>) => ({
+      choices: [
+        {
+          message: { content: '{"amount":1}' },
+          logprobs: { content: [{ token: '{"amount":1}', logprob: -0.1, bytes: null, top_logprobs: [{ token: '{"amount":1}', logprob: -0.1, bytes: null }] }] },
+        },
+      ],
+    }));
+    const client = { chat: { completions: { create } } } as unknown as OpenAI;
+    const answer = await openAICompleter(client)('system', 'user');
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ logprobs: true, top_logprobs: 5 });
+    expect(answer).toEqual({
+      content: '{"amount":1}',
+      logprobs: [{ token: '{"amount":1}', logprob: -0.1, bytes: null, top: [{ token: '{"amount":1}', logprob: -0.1, bytes: null }] }],
+    });
   });
 });
 
