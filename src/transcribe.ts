@@ -7,7 +7,29 @@ export interface TranscribeOptions {
   durationMs?: number;
   /** ISO-639-1 hint ("es", "en"). Omit to let Whisper auto-detect. */
   language?: string;
+  /** Upload filename. Its extension tells Whisper the audio format (default `spend.m4a`). */
   filename?: string;
+  /** MIME type of the upload. Defaults to the type matching the filename's extension. */
+  mimeType?: string;
+}
+
+/** Audio formats Whisper accepts, by file extension. */
+const MIME_TYPES: Record<string, string> = {
+  m4a: 'audio/m4a',
+  mp4: 'audio/mp4',
+  webm: 'audio/webm',
+  mp3: 'audio/mpeg',
+  mpga: 'audio/mpeg',
+  mpeg: 'audio/mpeg',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  flac: 'audio/flac',
+};
+
+/** MIME type for a filename's extension, so the upload's type never contradicts its name. */
+export function mimeTypeFor(filename: string): string {
+  const extension = filename.split('.').pop()?.toLowerCase() ?? '';
+  return MIME_TYPES[extension] ?? 'application/octet-stream';
 }
 
 export async function transcribe(audio: Buffer, opts: TranscribeOptions = {}): Promise<GuardResult> {
@@ -17,7 +39,8 @@ export async function transcribe(audio: Buffer, opts: TranscribeOptions = {}): P
   }
 
   const client = opts.client ?? new OpenAI();
-  const file = await toFile(audio, opts.filename ?? 'spend.m4a', { type: 'audio/m4a' });
+  const filename = opts.filename ?? 'spend.m4a';
+  const file = await toFile(audio, filename, { type: opts.mimeType ?? mimeTypeFor(filename) });
   const result = await client.audio.transcriptions.create({
     model: 'whisper-1',
     file,
