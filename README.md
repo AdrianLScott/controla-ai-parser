@@ -97,8 +97,11 @@ I expected the parse logprobs to do most of the work. They didn't: **gpt-4o-mini
   genuinely missing amount, a near-miss "Casita Acapulco", the transfer to a person filed as `Other`, an amount in words
   with decimals, and "850" at 22% because the model hesitated between writing digits and words). Transcripts vary
   from run to run, so these are indications, not benchmarks.
-- Not caught: a misheard clip the model rejects as "not an expense" ("Tuve el trabajo ochenta"). Rejections carry no
-  confidence yet.
+- Misheard clips the model *rejected* ("uber al trabajo 80" heard as "Subir al trabajo ochenta") couldn't be caught:
+  I measured the model's confidence on its rejections, and it was 100% sure on both misheard expenses and real
+  non-expenses alike. So the fix went into the prompt instead (v4): a voice note with an amount, in digits or words,
+  that isn't clearly a greeting, a test, a question or income is treated as an expense. Income, questions and mic tests
+  are still rejected, and in the audio eval all 3 failing clips were then flagged for review.
 
 Limits: logprobs aren't calibrated probabilities (0.62 doesn't mean "right 62% of the time"), and these numbers come
 from 44 text cases and 35 synthetic (text-to-speech) clips, not real recordings. A payment method the user never said
