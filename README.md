@@ -93,6 +93,13 @@ const result = await parseSpend(heard.text, openAICompleter());
 if (result.ok) await save(result.movement);
 ```
 
+## Releasing
+
+Published to npm as [`controla-ai-parser`](https://www.npmjs.com/package/controla-ai-parser) by [`.github/workflows/publish.yml`](.github/workflows/publish.yml):
+
+1. Open a PR that bumps the version: `npm version patch|minor|major --no-git-tag-version`.
+2. Merge it. If that version isn't on npm yet, CI publishes it (trusted publishing with provenance, no npm token), tags `vX.Y.Z` and creates a GitHub release.
+
 ## Next
 
 - Run the eval set on every prompt change in CI (needs an API key secret).
