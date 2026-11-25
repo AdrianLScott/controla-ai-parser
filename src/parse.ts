@@ -36,18 +36,20 @@ export type ParseResult =
     }
   | { ok: false; reason: RejectReason; detail?: string };
 
-export type ReviewThresholds = Partial<Record<Field | 'transcript', number>>;
+export type ReviewThresholds = Partial<Record<Field | 'transcript' | 'transcript_first_word', number>>;
 
 /**
  * A field is flagged when its probability is below these. `description` has none: its score is a weak signal.
  * Set from the eval runs (see README, "Confidence"): gpt-4o-mini is confident even when wrong, so the category
- * threshold is high, and the transcript one is low because the first word of a transcript often scores ~40%.
+ * threshold is high. Transcript words are flagged under 30%; the first word under 10%, because the model hesitates
+ * over its capitalization (correct first words scored 24–44%, mishearings there 0–3%).
  */
 export const DEFAULT_REVIEW_BELOW: Readonly<ReviewThresholds> = {
   amount: 0.8,
   category: 0.9,
   payment_method: 0.8,
   transcript: 0.3,
+  transcript_first_word: 0.1,
 };
 
 export interface ParseOptions {
@@ -125,7 +127,9 @@ export async function parseSpend(text: string, complete: Completer, opts: ParseO
 function review(movement: Movement, text: string, raw: string, logprobs: TokenLogprob[] | undefined, opts: ParseOptions) {
   const below = { ...DEFAULT_REVIEW_BELOW, ...opts.reviewBelow };
   const fields = logprobs ? fieldConfidence(raw, logprobs) : undefined;
-  const transcript = opts.transcript ? transcriptConfidence(opts.transcript, below.transcript ?? 0.5) : undefined;
+  const transcript = opts.transcript
+    ? transcriptConfidence(opts.transcript, below.transcript ?? 0.3, below.transcript_first_word ?? 0.1)
+    : undefined;
   const flagged = new Set<Field>();
 
   for (const field of ['amount', 'category', 'payment_method', 'description'] as const) {
@@ -139,8 +143,9 @@ function review(movement: Movement, text: string, raw: string, logprobs: TokenLo
 
   const shaky = transcript !== undefined && transcript.uncertain.length > 0;
   if (shaky) {
-    // A misheard word is usually the item ("uber eats" → "uvevip"), so the category is suspect.
-    flagged.add('category');
+    // A misheard word is usually the item ("uber eats" → "uvevip"), so the category is suspect. An unsure number
+    // ("850" vs "eight hundred fifty") says nothing about the item.
+    if (transcript.uncertain.some((w) => !/^[\d.,$]+$/.test(w.text))) flagged.add('category');
     // And a misheard number is a misheard amount: an unsure word with digits, or an amount not written as digits.
     const digits = String(movement.amount / 100);
     if (transcript.uncertain.some((w) => /\d/.test(w.text)) || !text.replace(/[,\s]/g, '').includes(digits)) {
