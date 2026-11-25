@@ -90,7 +90,10 @@ I expected the parse logprobs to do most of the work. They didn't: **gpt-4o-mini
   ones flagged. The threshold alone (0.9) caught 1/4.
 - Audio eval: transcript logprobs are where the signal is. "uber eats 230" was heard as "uvevip doscientos treinta",
   with *uvevip* at **3%**. The first word of a transcript often scores ~40% (capitalization), hence the 0.3 threshold.
-  2/3 failing clips flagged on the right field, 2/32 passing clips flagged (one is a genuinely missing amount).
+  Two runs: 2/3 and 1/2 failing clips flagged on the right field; 5/33 passing clips flagged on the second run (a
+  genuinely missing amount, a near-miss "Casita Acapulco", the transfer to a person filed as `Other`, an amount in words
+  with decimals, and "850" at 22% because the model hesitated between writing digits and words). Transcripts vary
+  from run to run, so these are indications, not benchmarks.
 - Not caught: a misheard clip the model rejects as "not an expense" ("Tuve el trabajo ochenta"). Rejections carry no
   confidence yet.
 
