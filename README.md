@@ -74,14 +74,29 @@ not claimed.
 |---|---|---|
 | Parse logprobs ([`src/confidence.ts`](src/confidence.ts)) | the model hesitating between values | Tokens mapped back to each JSON value by **byte** offset (a token can hold half of "á"). Enums, amount: joint probability of the value; alternatives from the token where the model hesitated. Description: geometric mean, reported but never flagged. |
 | Transcript logprobs (`transcribe` with `gpt-4o-*-transcribe`) | mishearings the parser can't see | Per word; words below the threshold are listed in `confidence.transcript.uncertain`. An unsure transcript also flags `amount` when the amount wasn't heard as digits. |
-| Rules | missing values | `amount: 0` is always flagged. |
+| Rules | missing values, the fallback | `amount: 0` and `category: Other` are always flagged. A shaky transcript also flags `category`. |
 
 Thresholds are per field (`parseSpend(text, complete, { reviewBelow: { category: 0.7 } })`), because each scoring
 method spreads its numbers differently. Defaults are in `DEFAULT_REVIEW_BELOW`.
 
-Limits: logprobs aren't calibrated probabilities (0.62 doesn't mean "right 62% of the time"), so thresholds are picked
-from the eval set rather than assumed. A payment method the user never said is defaulted to Cash by the prompt, and
-the model is confident about that default, so it isn't flagged.
+### What the evals showed
+
+I expected the parse logprobs to do most of the work. They didn't: **gpt-4o-mini is confident even when it's wrong.**
+
+- Text eval: 4 wrong categories on the hard cases came back at 85%, 94%, 99% and 100%. Three of them were `Other`:
+  the prompt says "ambiguous → Other", so the model is sure about *following the rule*, not about the category. Amount
+  and payment method were ~100% on every case.
+- Flagging `Other` as a rule, plus a 0.9 category threshold, catches **4/4** wrong categories with **2/29** correct
+  ones flagged. The threshold alone (0.9) caught 1/4.
+- Audio eval: transcript logprobs are where the signal is. "uber eats 230" was heard as "uvevip doscientos treinta",
+  with *uvevip* at **3%**. The first word of a transcript often scores ~40% (capitalization), hence the 0.3 threshold.
+  2/3 failing clips flagged on the right field, 2/32 passing clips flagged (one is a genuinely missing amount).
+- Not caught: a misheard clip the model rejects as "not an expense" ("Tuve el trabajo ochenta"). Rejections carry no
+  confidence yet.
+
+Limits: logprobs aren't calibrated probabilities (0.62 doesn't mean "right 62% of the time"), and these numbers come
+from 44 text cases and 35 synthetic (text-to-speech) clips, not real recordings. A payment method the user never said
+is defaulted to Cash by the prompt, and the model is confident about that default, so it isn't flagged.
 
 ## The bug that shaped this
 
@@ -134,7 +149,7 @@ false-alarm side: flag at most 5% of correct fields. It saves the full result to
 
 ```bash
 npm install
-npm test        # 78 tests, offline, no API key needed
+npm test        # 80 tests, offline, no API key needed
 ```
 
 Covers the guards (every known hallucination, empty input, accidental taps), every rejection path in the parser (non-JSON, unknown category, negative amount, `is_expense: false`, guard short-circuits without calling the model), cents rounding, and the eval set's own integrity.

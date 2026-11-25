@@ -40,13 +40,14 @@ export type ReviewThresholds = Partial<Record<Field | 'transcript', number>>;
 
 /**
  * A field is flagged when its probability is below these. `description` has none: its score is a weak signal.
- * Chosen so few correct fields get flagged on the eval set (see README, "Confidence").
+ * Set from the eval runs (see README, "Confidence"): gpt-4o-mini is confident even when wrong, so the category
+ * threshold is high, and the transcript one is low because the first word of a transcript often scores ~40%.
  */
 export const DEFAULT_REVIEW_BELOW: Readonly<ReviewThresholds> = {
   amount: 0.8,
-  category: 0.8,
+  category: 0.9,
   payment_method: 0.8,
-  transcript: 0.5,
+  transcript: 0.3,
 };
 
 export interface ParseOptions {
@@ -133,10 +134,14 @@ function review(movement: Movement, text: string, raw: string, logprobs: TokenLo
     if (p !== undefined && threshold !== undefined && p < threshold) flagged.add(field);
   }
   if (movement.amount === 0) flagged.add('amount'); // the model found no amount
+  // The prompt says "ambiguous → Other", so the model is confident about Other even when it just didn't know.
+  if (movement.category === 'Other') flagged.add('category');
 
   const shaky = transcript !== undefined && transcript.uncertain.length > 0;
   if (shaky) {
-    // A misheard number is a misheard amount: an unsure word with digits, or an amount not written as digits.
+    // A misheard word is usually the item ("uber eats" → "uvevip"), so the category is suspect.
+    flagged.add('category');
+    // And a misheard number is a misheard amount: an unsure word with digits, or an amount not written as digits.
     const digits = String(movement.amount / 100);
     if (transcript.uncertain.some((w) => /\d/.test(w.text)) || !text.replace(/[,\s]/g, '').includes(digits)) {
       flagged.add('amount');

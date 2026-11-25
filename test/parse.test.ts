@@ -95,10 +95,24 @@ describe('parseSpend confidence', () => {
   it('respects per-field thresholds', async () => {
     const result = await parseSpend('ida a la playa 500', withLogprobs(playa, { category: 0.62 }), { reviewBelow: { category: 0.5 } });
     expect(result).not.toHaveProperty('needs_review');
+    const strict = await parseSpend('ida a la playa 500', withLogprobs(playa, { category: 0.95 }), { reviewBelow: { category: 0.99 } });
+    expect(strict).toMatchObject({ needs_review: ['category'] });
   });
 
   it('never flags the description by default', async () => {
     const result = await parseSpend('ida a la playa 500', withLogprobs(playa, { description: 0.1 }));
+    expect(result).not.toHaveProperty('needs_review');
+  });
+
+  it('always flags Other: the model is confident about its fallback even when it did not know', async () => {
+    const result = await parseSpend('regalo para mi mamá 600', withLogprobs({ ...playa, amount: 600, category: 'Other' }, { category: 0.99 }));
+    expect(result).toMatchObject({ ok: true, needs_review: ['category'] });
+  });
+
+  it('ignores a slightly unsure first word (capitalization), below the transcript threshold only', async () => {
+    const transcript: TokenLogprob[] = [{ token: 'Tacos', logprob: Math.log(0.4) }, { token: ' trescientos', logprob: Math.log(0.99) }];
+    const result = await parseSpend('Tacos trescientos', withLogprobs({ ...playa, category: 'Food', amount: 300 }, {}), { transcript });
+    expect(result).toMatchObject({ ok: true, transcript_uncertain: false });
     expect(result).not.toHaveProperty('needs_review');
   });
 
@@ -116,7 +130,8 @@ describe('parseSpend confidence', () => {
     ];
     const food = { ...playa, amount: 230, category: 'Food', description: 'Lipis' };
     const result = await parseSpend('Tuve lipis doscientos treinta', withLogprobs(food, {}), { transcript });
-    expect(result).toMatchObject({ ok: true, transcript_uncertain: true, needs_review: ['amount'] });
+    expect(result).toMatchObject({ ok: true, transcript_uncertain: true });
+    if (result.ok) expect(result.needs_review?.sort()).toEqual(['amount', 'category']);
     if (result.ok) expect(result.confidence?.transcript?.uncertain.map((w) => w.text)).toEqual(['lipis']);
   });
 
