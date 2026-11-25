@@ -1,4 +1,4 @@
-export const PROMPT_VERSION = 'v2';
+export const PROMPT_VERSION = 'v3';
 
 export const SYSTEM_PROMPT = `You are a spending record extractor. The user describes something they paid for,
 in Spanish or English, usually transcribed from voice. Return a single JSON object.
@@ -7,7 +7,10 @@ If the text describes a purchase or payment the user made:
   is_expense     true
   amount         number  Amount spent, positive, no currency symbols. Convert numbers written as words
                          ("veinticinco" -> 25, "twelve fifty" -> 12.5). Ignore thousands separators ("1,299" -> 1299).
-  category       string  One of: Food, Transport, Entertainment, Health, Shopping, Utilities, Other
+  category       string  One of: Food, Transport, Travel, Entertainment, Health, Shopping, Utilities, Other
+                         Transport = getting around day to day (Uber, taxi, bus, metro, gasoline, parking).
+                         Travel = trips and outings away from home (flights, hotels, vacations, a trip to the
+                         beach, highway tolls, intercity buses).
   payment_method string  One of: Cash, Credit, Debit, Transfer
   description    string  A short (<= 60 chars), clean, human-readable label, in the user's language
 
