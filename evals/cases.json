@@ -25,6 +25,17 @@
   { "id": "en-gym", "input": "gym membership 499 debit", "tags": ["en", "ambiguous"], "expect": { "amount": 49900, "category": "Health", "payment_method": "Debit" } },
   { "id": "en-missing-amount", "input": "spent some money on coffee", "tags": ["en", "missing-amount"], "expect": { "amount": 0, "category": "Food", "payment_method": "Cash" } },
 
+  { "id": "es-hard-trip-gas", "input": "gasolina del viaje a guadalajara 900", "tags": ["es", "hard"], "expect": { "amount": 90000, "category": "Travel", "payment_method": "Cash" } },
+  { "id": "es-hard-car-rental", "input": "renta de coche en cancún 1200 con crédito", "tags": ["es", "hard"], "expect": { "amount": 120000, "category": "Travel", "payment_method": "Credit" } },
+  { "id": "es-hard-airport-food", "input": "comida en el aeropuerto 250", "tags": ["es", "hard"], "expect": { "amount": 25000, "category": "Food", "payment_method": "Cash" } },
+  { "id": "es-hard-bus-ticket", "input": "boletos de autobús a puebla 400", "tags": ["es", "hard"], "expect": { "amount": 40000, "category": "Travel", "payment_method": "Cash" } },
+  { "id": "es-hard-car-insurance", "input": "seguro del carro 3000 transferencia", "tags": ["es", "hard"], "expect": { "amount": 300000, "category": "Transport", "payment_method": "Transfer" } },
+  { "id": "es-hard-gift", "input": "regalo para mi mamá 600", "tags": ["es", "hard"], "expect": { "amount": 60000, "category": "Shopping", "payment_method": "Cash" } },
+  { "id": "es-hard-convenience-store", "input": "oxxo 85", "tags": ["es", "hard"], "expect": { "amount": 8500, "category": "Food", "payment_method": "Cash" } },
+  { "id": "es-hard-amount-words", "input": "mil doscientos cincuenta de súper con débito", "tags": ["es", "hard", "words"], "expect": { "amount": 125000, "category": "Food", "payment_method": "Debit" } },
+  { "id": "es-hard-misheard-brand", "input": "Tuve lipis doscientos treinta", "tags": ["es", "hard", "misheard"], "expect": { "amount": 23000, "category": "Food", "payment_method": "Cash" } },
+  { "id": "es-hard-misheard-commute", "input": "Subí al trabajo 80", "tags": ["es", "hard", "misheard"], "expect": { "amount": 8000, "category": "Transport", "payment_method": "Cash" } },
+
   { "id": "hallucination-amara", "input": "Subtítulos realizados por la comunidad de Amara.org", "tags": ["hallucination"], "expect": { "reject": true } },
   { "id": "hallucination-thanks", "input": "Thanks for watching!", "tags": ["hallucination"], "expect": { "reject": true } },
   { "id": "hallucination-gracias", "input": "Gracias por ver el video.", "tags": ["hallucination"], "expect": { "reject": true } },

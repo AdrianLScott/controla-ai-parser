@@ -1,5 +1,6 @@
 import OpenAI, { toFile } from 'openai';
-import { checkAudio, type GuardResult } from './guards.js';
+import type { TokenLogprob } from './confidence.js';
+import { checkAudio, type RejectReason } from './guards.js';
 
 /**
  * Transcription model used when none is given. `gpt-4o-mini-transcribe` is cheaper than `whisper-1`
@@ -7,6 +8,11 @@ import { checkAudio, type GuardResult } from './guards.js';
  */
 export const DEFAULT_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe';
 
+/** The transcript, plus per-token logprobs when the model provides them (gpt-4o-*-transcribe; not whisper-1). */
+export type TranscribeResult = { ok: true; text: string; logprobs?: TokenLogprob[] } | { ok: false; reason: RejectReason };
+
+/** Models that can return logprobs for the transcript. */
+const supportsLogprobs = (model: string) => /^gpt-4o.*transcribe/.test(model);
 
 export interface TranscribeOptions {
   client?: OpenAI;
@@ -46,7 +52,7 @@ export function mimeTypeFor(filename: string): string {
   return MIME_TYPES[extension] ?? 'application/octet-stream';
 }
 
-export async function transcribe(audio: Buffer, opts: TranscribeOptions = {}): Promise<GuardResult> {
+export async function transcribe(audio: Buffer, opts: TranscribeOptions = {}): Promise<TranscribeResult> {
   if (opts.durationMs !== undefined) {
     const guard = checkAudio(opts.durationMs);
     if (!guard.ok) return guard;
@@ -55,11 +61,16 @@ export async function transcribe(audio: Buffer, opts: TranscribeOptions = {}): P
   const client = opts.client ?? new OpenAI();
   const filename = opts.filename ?? 'spend.m4a';
   const file = await toFile(audio, filename, { type: opts.mimeType ?? mimeTypeFor(filename) });
+  const model = opts.model ?? DEFAULT_TRANSCRIBE_MODEL;
   const result = await client.audio.transcriptions.create({
-    model: opts.model ?? DEFAULT_TRANSCRIBE_MODEL,
+    model,
     file,
+    ...(supportsLogprobs(model) ? { include: ['logprobs' as const] } : {}),
     ...(opts.prompt ? { prompt: opts.prompt } : {}),
     ...(opts.language ? { language: opts.language } : {}),
   });
-  return { ok: true, text: result.text };
+  const logprobs = result.logprobs
+    ?.filter((t) => t.token !== undefined && t.logprob !== undefined)
+    .map((t) => ({ token: t.token!, logprob: t.logprob!, bytes: t.bytes ?? null }));
+  return { ok: true, text: result.text, ...(logprobs?.length ? { logprobs } : {}) };
 }
