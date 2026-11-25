@@ -4,13 +4,27 @@
   "description": "Turns a spoken or typed expense into a validated record: Whisper → GPT-4o-mini → Zod, with guardrails and an eval set.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AdrianLScott/controla-ai-parser.git"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "eval": "tsx evals/run.ts"
+    "eval": "tsx evals/run.ts",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "openai": "^4.104.0",
@@ -22,5 +36,7 @@
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }
