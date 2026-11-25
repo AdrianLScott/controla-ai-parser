@@ -76,7 +76,7 @@ Each run prints pass/fail per case with the exact field that was wrong, a pass r
 
 ```bash
 npm install
-npm test        # 34 tests, offline, no API key needed
+npm test        # 47 tests, offline, no API key needed
 ```
 
 Covers the guards (every known hallucination, empty input, accidental taps), every rejection path in the parser (non-JSON, unknown category, negative amount, `is_expense: false`, guard short-circuits without calling the model), cents rounding, and the eval set's own integrity.
