@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const CATEGORIES = [
   'Food',
   'Transport',
+  'Travel',
   'Entertainment',
   'Health',
   'Shopping',

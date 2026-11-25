@@ -75,7 +75,7 @@ The fix is three layers, cheapest first:
 | `words` | Amounts written as words | "veinticinco pesos de camión" → 2500 |
 | `decimals`, `format` | Decimals and thousands separators | "zapatos 1,299 a meses…" → 129900 |
 | `defaults` | Missing payment method falls back to Cash | "tacos 300" |
-| `inference`, `tricky` | Category from context, brand traps | "ida a la playa 500" → Transport; "uber eats 230" → Food |
+| `inference`, `tricky` | Category from context, brand traps | "ida a la playa 500" → Travel; "uber eats 230" → Food |
 | `ambiguous` | Cases where a human could disagree | "gas for the car" vs "recibo del gas" |
 | `hallucination` | Whisper subtitle artifacts | "Subtítulos realizados por la comunidad de Amara.org" |
 | `not-expense` | Text that must not become a record | "hola, probando, probando", "me pagaron 5000" |
