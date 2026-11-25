@@ -109,8 +109,8 @@ describe('parseSpend confidence', () => {
     expect(result).toMatchObject({ ok: true, needs_review: ['category'] });
   });
 
-  it('ignores a slightly unsure first word (capitalization), below the transcript threshold only', async () => {
-    const transcript: TokenLogprob[] = [{ token: 'Tacos', logprob: Math.log(0.4) }, { token: ' trescientos', logprob: Math.log(0.99) }];
+  it('ignores an unsure first word unless it is very unsure (capitalization doubt)', async () => {
+    const transcript: TokenLogprob[] = [{ token: 'Cine', logprob: Math.log(0.24) }, { token: ' trescientos', logprob: Math.log(0.99) }];
     const result = await parseSpend('Tacos trescientos', withLogprobs({ ...playa, category: 'Food', amount: 300 }, {}), { transcript });
     expect(result).toMatchObject({ ok: true, transcript_uncertain: false });
     expect(result).not.toHaveProperty('needs_review');
@@ -133,6 +133,13 @@ describe('parseSpend confidence', () => {
     expect(result).toMatchObject({ ok: true, transcript_uncertain: true });
     if (result.ok) expect(result.needs_review?.sort()).toEqual(['amount', 'category']);
     if (result.ok) expect(result.confidence?.transcript?.uncertain.map((w) => w.text)).toEqual(['lipis']);
+  });
+
+  it('flags only the amount when the unsure word is a number', async () => {
+    const transcript: TokenLogprob[] = [{ token: 'Pay', logprob: Math.log(0.95) }, { token: ' the bill', logprob: Math.log(0.99) }, { token: ' 850', logprob: Math.log(0.22) }];
+    const bill = { ...playa, amount: 850, category: 'Utilities' };
+    const result = await parseSpend('Pay the bill 850', withLogprobs(bill, {}), { transcript });
+    expect(result).toMatchObject({ ok: true, transcript_uncertain: true, needs_review: ['amount'] });
   });
 
   it('does not flag a clear transcript', async () => {

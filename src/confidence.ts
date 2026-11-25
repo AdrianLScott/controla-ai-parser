@@ -222,8 +222,15 @@ export function fieldConfidence(raw: string, tokens: TokenLogprob[]): Confidence
 /**
  * Word-level confidence for a transcript. Tokens are grouped into words by their leading space; a word's `p` is the
  * joint probability of its tokens. Words below `below` are listed as uncertain.
+ *
+ * The first word gets its own, lower threshold: the model hesitates over its capitalization ("Cine" vs "cine"), so
+ * correct first words often score 25–45%, while real mishearings there ("uvevip", "TVips") score under 5%.
  */
-export function transcriptConfidence(tokens: TokenLogprob[], below: number): TranscriptConfidence | undefined {
+export function transcriptConfidence(
+  tokens: TokenLogprob[],
+  below: number,
+  firstWordBelow = below,
+): TranscriptConfidence | undefined {
   if (tokens.length === 0) return undefined;
   const words: { bytes: Buffer[]; logprob: number }[] = [];
   for (const token of tokens) {
@@ -236,7 +243,8 @@ export function transcriptConfidence(tokens: TokenLogprob[], below: number): Tra
   }
   const mean = tokens.reduce((s, t) => s + t.logprob, 0) / tokens.length;
   const uncertain = words
-    .map((w) => ({ text: Buffer.concat(w.bytes).toString('utf8').trim(), p: Math.exp(w.logprob) }))
-    .filter((w) => w.text && /[\p{L}\p{N}]/u.test(w.text) && w.p < below);
+    .map((w, i) => ({ text: Buffer.concat(w.bytes).toString('utf8').trim(), p: Math.exp(w.logprob), first: i === 0 }))
+    .filter((w) => w.text && /[\p{L}\p{N}]/u.test(w.text) && w.p < (w.first ? firstWordBelow : below))
+    .map(({ text, p }) => ({ text, p }));
   return { p: Math.exp(mean), uncertain };
 }

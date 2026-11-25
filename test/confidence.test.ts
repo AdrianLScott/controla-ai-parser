@@ -152,6 +152,12 @@ describe('transcriptConfidence', () => {
     expect(t.p).toBeLessThan(0.9);
   });
 
+  it('uses a separate threshold for the first word (capitalization doubt)', () => {
+    const t = tokens(['C', 0.5], ['ine', 0.5], [' con', 0.99], [' mi', 0.2]);
+    expect(transcriptConfidence(t, 0.3, 0.1)!.uncertain.map((w) => w.text)).toEqual(['mi']); // Cine 25% is kept
+    expect(transcriptConfidence(tokens(['TV', 0.02], ['ips', 0.5], [' 230', 0.99]), 0.3, 0.1)!.uncertain.map((w) => w.text)).toEqual(['TVips']);
+  });
+
   it('reassembles words split inside a multi-byte character', () => {
     const t = transcriptConfidence([...tokens([' farmacia', 0.9]), ...splitBytes(' más', 3, [0.6, 0.5])], 0.5)!;
     expect(t.uncertain).toEqual([{ text: 'más', p: expect.closeTo(0.3) }]);

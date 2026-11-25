@@ -73,8 +73,8 @@ not claimed.
 | Signal | Catches | How it's scored |
 |---|---|---|
 | Parse logprobs ([`src/confidence.ts`](src/confidence.ts)) | the model hesitating between values | Tokens mapped back to each JSON value by **byte** offset (a token can hold half of "á"). Enums, amount: joint probability of the value; alternatives from the token where the model hesitated. Description: geometric mean, reported but never flagged. |
-| Transcript logprobs (`transcribe` with `gpt-4o-*-transcribe`) | mishearings the parser can't see | Per word; words below the threshold are listed in `confidence.transcript.uncertain`. An unsure transcript also flags `amount` when the amount wasn't heard as digits. |
-| Rules | missing values, the fallback | `amount: 0` and `category: Other` are always flagged. A shaky transcript also flags `category`. |
+| Transcript logprobs (`transcribe` with `gpt-4o-*-transcribe`) | mishearings the parser can't see | Per word; words below the threshold (the first word has a lower one) are listed in `confidence.transcript.uncertain`. An unsure word flags `category`; an unsure number, or an amount not heard as digits, flags `amount`. |
+| Rules | missing values, the fallback | `amount: 0` and `category: Other` are always flagged. |
 
 Thresholds are per field (`parseSpend(text, complete, { reviewBelow: { category: 0.7 } })`), because each scoring
 method spreads its numbers differently. Defaults are in `DEFAULT_REVIEW_BELOW`.
@@ -90,7 +90,10 @@ I expected the parse logprobs to do most of the work. They didn't: **gpt-4o-mini
   ones flagged. The threshold alone (0.9) caught 1/4.
 - Audio eval: transcript logprobs are where the signal is. "uber eats 230" was heard as "uvevip doscientos treinta",
   with *uvevip* at **3%**. The first word of a transcript often scores ~40% (capitalization), hence the 0.3 threshold.
-  Two runs: 2/3 and 1/2 failing clips flagged on the right field; 5/33 passing clips flagged on the second run (a
+  The first word of a transcript gets its own threshold (10%): the model hesitates over its capitalization, so
+  correct first words scored 24–44% ("Cine", "Tacos", "Veinticinco") while mishearings there scored 0–3% ("uvevip",
+  "Tuverips", "TVips"). An unsure number ("850" at 22%, digits vs words) flags only the amount.
+  Before those two rules, two runs: 2/3 and 1/2 failing clips flagged on the right field; 5/33 passing clips flagged on the second run (a
   genuinely missing amount, a near-miss "Casita Acapulco", the transfer to a person filed as `Other`, an amount in words
   with decimals, and "850" at 22% because the model hesitated between writing digits and words). Transcripts vary
   from run to run, so these are indications, not benchmarks.
@@ -152,7 +155,7 @@ false-alarm side: flag at most 5% of correct fields. It saves the full result to
 
 ```bash
 npm install
-npm test        # 80 tests, offline, no API key needed
+npm test        # 82 tests, offline, no API key needed
 ```
 
 Covers the guards (every known hallucination, empty input, accidental taps), every rejection path in the parser (non-JSON, unknown category, negative amount, `is_expense: false`, guard short-circuits without calling the model), cents rounding, and the eval set's own integrity.
