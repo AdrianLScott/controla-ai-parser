@@ -4,9 +4,9 @@ import { DEFAULT_TRANSCRIBE_MODEL, mimeTypeFor, transcribe } from '../src/transc
 
 /** A fake OpenAI client that records the uploaded file, so tests run offline. */
 function fakeClient(text = 'tacos 300') {
-  const create = vi.fn(async (_req: { file: File; model: string }) => ({ text }));
+  const create = vi.fn(async (_req: { file: File; model: string; prompt?: string }) => ({ text }));
   const client = { audio: { transcriptions: { create } } } as unknown as OpenAI;
-  return { client, create, uploaded: () => create.mock.calls[0]?.[0].file, model: () => create.mock.calls[0]?.[0].model };
+  return { client, create, uploaded: () => create.mock.calls[0]?.[0].file, model: () => create.mock.calls[0]?.[0].model, request: () => create.mock.calls[0]?.[0] };
 }
 
 const audio = Buffer.from('fake audio bytes');
@@ -60,6 +60,18 @@ describe('transcribe', () => {
     const { client, model } = fakeClient();
     await transcribe(audio, { client, model: 'whisper-1' });
     expect(model()).toBe('whisper-1');
+  });
+
+  it('sends no prompt by default', async () => {
+    const { client, request } = fakeClient();
+    await transcribe(audio, { client });
+    expect(request()).not.toHaveProperty('prompt');
+  });
+
+  it('sends the prompt it is given', async () => {
+    const { client, request } = fakeClient();
+    await transcribe(audio, { client, prompt: 'Uber Eats, Rappi' });
+    expect(request()?.prompt).toBe('Uber Eats, Rappi');
   });
 
   it('rejects a too-short clip without calling Whisper', async () => {

@@ -1,7 +1,7 @@
 {
   "name": "controla-ai-parser",
-  "version": "0.1.1",
-  "description": "Turns a spoken or typed expense into a validated record: Whisper → GPT-4o-mini → Zod, with guardrails and an eval set.",
+  "version": "0.2.0",
+  "description": "Turns a spoken or typed expense into a validated record: speech-to-text → GPT-4o-mini → Zod, with guardrails and an eval set.",
   "type": "module",
   "license": "MIT",
   "repository": {

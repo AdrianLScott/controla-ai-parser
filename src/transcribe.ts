@@ -7,10 +7,16 @@ import { checkAudio, type GuardResult } from './guards.js';
  */
 export const DEFAULT_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe';
 
+
 export interface TranscribeOptions {
   client?: OpenAI;
   /** OpenAI transcription model (default {@link DEFAULT_TRANSCRIBE_MODEL}). */
   model?: string;
+  /**
+   * Optional vocabulary/context hint for the model, e.g. brand names it tends to mishear. None by default:
+   * on silent audio the model can echo the hint back as the transcript.
+   */
+  prompt?: string;
   /** Length of the recording; very short clips are rejected before calling the model. */
   durationMs?: number;
   /** ISO-639-1 hint ("es", "en"). Omit to let the model auto-detect. */
@@ -52,6 +58,7 @@ export async function transcribe(audio: Buffer, opts: TranscribeOptions = {}): P
   const result = await client.audio.transcriptions.create({
     model: opts.model ?? DEFAULT_TRANSCRIBE_MODEL,
     file,
+    ...(opts.prompt ? { prompt: opts.prompt } : {}),
     ...(opts.language ? { language: opts.language } : {}),
   });
   return { ok: true, text: result.text };

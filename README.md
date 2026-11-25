@@ -15,9 +15,9 @@ Controla is also my hands-on lab for AI engineering. Each concept I learn (struc
 ## Pipeline
 
 ```
-audio ──► audio guard ──► Whisper ──► transcript guard ──► GPT-4o-mini ──► JSON.parse ──► Zod ──► cents ──► store
-          (< 0.8 s?)                  (empty? known                        (not JSON?)     (closed     (integer
-                                       hallucination?)                                      schema)     money)
+audio ──► audio guard ──► transcribe ──► transcript guard ──► GPT-4o-mini ──► JSON.parse ──► Zod ──► cents ──► store
+          (< 0.8 s?)                     (empty? known                        (not JSON?)     (closed     (integer
+                                          hallucination?)                                      schema)     money)
 ```
 
 Every arrow can say **no**. A rejection is a normal result with a reason, not an exception:
@@ -28,6 +28,22 @@ type ParseResult =
   | { ok: false; reason: 'audio_too_short' | 'empty_transcript' | 'known_hallucination' | 'too_short'
                        | 'invalid_json' | 'schema_violation' | 'not_an_expense'; detail?: string };
 ```
+
+## Choosing the transcription model
+
+Transcription uses `gpt-4o-mini-transcribe` by default (`model` option to override). I compared it with `whisper-1`
+by sending 31 spoken clips (the eval set read by a text-to-speech voice, plus silence and accidental taps) through
+transcribe → parse:
+
+| | `whisper-1` | `gpt-4o-mini-transcribe` |
+|---|---|---|
+| Clips passed | 30/31 | 30/31 |
+| "uber eats 230 con crédito" | "vRips230": amount and category wrong | "Tuve lipis doscientos treinta": amount right, category wrong |
+| Silent clips | "Thank you for watching." (caught by the transcript guard) | empty transcript |
+| Price | $0.006/min | ~$0.003/min |
+
+A vocabulary hint (`prompt` option) fixed the brand name, but on silent clips the model echoed the hint back as the
+transcript, so it's opt-in and off by default.
 
 ## The bug that shaped this
 
@@ -108,7 +124,7 @@ Published to npm as [`controla-ai-parser`](https://www.npmjs.com/package/control
 
 ## Stack
 
-TypeScript · OpenAI (Whisper, GPT-4o-mini) · Zod · Vitest · Node 20+
+TypeScript · OpenAI (gpt-4o-mini-transcribe, GPT-4o-mini) · Zod · Vitest · Node 20+
 
 ---
 
