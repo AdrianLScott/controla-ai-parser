@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type OpenAI from 'openai';
-import { mimeTypeFor, transcribe } from '../src/transcribe.js';
+import { DEFAULT_TRANSCRIBE_MODEL, mimeTypeFor, transcribe } from '../src/transcribe.js';
 
 /** A fake OpenAI client that records the uploaded file, so tests run offline. */
 function fakeClient(text = 'tacos 300') {
-  const create = vi.fn(async (_req: { file: File }) => ({ text }));
+  const create = vi.fn(async (_req: { file: File; model: string }) => ({ text }));
   const client = { audio: { transcriptions: { create } } } as unknown as OpenAI;
-  return { client, create, uploaded: () => create.mock.calls[0]?.[0].file };
+  return { client, create, uploaded: () => create.mock.calls[0]?.[0].file, model: () => create.mock.calls[0]?.[0].model };
 }
 
 const audio = Buffer.from('fake audio bytes');
@@ -47,6 +47,19 @@ describe('transcribe', () => {
     const { client, uploaded } = fakeClient();
     await transcribe(audio, { client, filename: 'audio.webm', mimeType: 'audio/webm;codecs=opus' });
     expect(uploaded()?.type).toBe('audio/webm;codecs=opus');
+  });
+
+  it('uses gpt-4o-mini-transcribe by default', async () => {
+    const { client, model } = fakeClient();
+    await transcribe(audio, { client });
+    expect(DEFAULT_TRANSCRIBE_MODEL).toBe('gpt-4o-mini-transcribe');
+    expect(model()).toBe('gpt-4o-mini-transcribe');
+  });
+
+  it('uses the model it is given', async () => {
+    const { client, model } = fakeClient();
+    await transcribe(audio, { client, model: 'whisper-1' });
+    expect(model()).toBe('whisper-1');
   });
 
   it('rejects a too-short clip without calling Whisper', async () => {
