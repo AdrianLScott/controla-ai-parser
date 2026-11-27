@@ -142,6 +142,13 @@ First eval with dates (prompt v5, gpt-4o-mini, today = Thursday 2026-11-26):
 - "mañana pago el internet 600" was dated today and not flagged. Decision: planned payments aren't recorded. Prompt v6
   rejects them, and a code guard rejects any future date (see below).
 
+Prompt v6 (planned payments): main set 41/41. Both planned payments ("mañana pago el internet", "voy a pagar la renta
+mañana") were rejected by the model itself ("Payment not yet made"), so the `future_date` guard didn't have to fire.
+The control "ayer pagué el internet 600" passed, real non-expenses stayed rejected, and date cases were 14/14 ("last
+friday" was right this time, at 57%, so still flagged). Side effects are borderline categories moving a little:
+"gym" went to 88% Health (flagged under 0.9) and "regalo para mi mamá" went back to Other. That's 2/41 correct
+categories flagged, inside the 5% budget.
+
 ## The bug that shaped this
 
 In real use, my expense list started showing entries like **"Subtítulos en Amara"**. Nobody said that. When Whisper receives silence or a very short accidental recording, it sometimes "hears" text from its training data, typically subtitle credits like *"Subtítulos realizados por la comunidad de Amara.org"*. The parser then did exactly what it was told and turned that into an expense.
