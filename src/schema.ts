@@ -28,6 +28,12 @@ export const ModelOutputSchema = z.discriminatedUnion('is_expense', [
     category: z.enum(CATEGORIES),
     payment_method: z.enum(PAYMENT_METHODS),
     description: z.string().min(1).max(120),
+    /** The day the money was spent, only when the text says one ("ayer", "el lunes"). Null otherwise. */
+    date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .nullable()
+      .optional(),
   }),
   z.object({
     is_expense: z.literal(false),
@@ -43,6 +49,8 @@ export interface Movement {
   category: Category;
   payment_method: PaymentMethod;
   description: string;
+  /** Day the money was spent, `YYYY-MM-DD` in the user's calendar. Today when the text doesn't say. */
+  date: string;
 }
 
 export function toCents(amount: number): number {

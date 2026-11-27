@@ -16,7 +16,7 @@ import OpenAI from 'openai';
 import { openAICompleter, parseSpend } from '../src/parse.js';
 import { PROMPT_VERSION } from '../src/prompt.js';
 import type { ParseResult } from '../src/parse.js';
-import { loadCases } from './cases.js';
+import { loadCases, todayFor, EVAL_TODAY } from './cases.js';
 import {
   byTag,
   CHECKED_FIELDS,
@@ -48,13 +48,14 @@ const instances: FieldInstance[] = [];
 const pct = (p: number) => `${Math.round(p * 100)}%`.padStart(4);
 
 for (const c of cases) {
-  const result = await parseSpend(c.input, complete);
+  const result = await parseSpend(c.input, complete, { today: todayFor(c) });
   const score = scoreCase(c, result);
   scores.push({ ...score, result });
   instances.push(...fieldInstances(c, result));
   const mark = score.pass ? 'PASS' : 'FAIL';
+  const date = result.ok && result.movement.date !== todayFor(c) ? `  [date: ${result.movement.date}]` : '';
   const review = result.ok && result.needs_review ? `  [review: ${result.needs_review.join(', ')}]` : '';
-  console.log(`${mark}  ${c.id.padEnd(26)} ${score.failures.join('; ')}${review}`);
+  console.log(`${mark}  ${c.id.padEnd(26)} ${score.failures.join('; ')}${date}${review}`);
 }
 
 const main = scores.filter((s) => !s.tags.includes('hard'));
@@ -62,7 +63,7 @@ const hard = scores.filter((s) => s.tags.includes('hard'));
 const passed = main.filter((s) => s.pass).length;
 const rate = passed / main.length;
 
-console.log(`\n${passed}/${main.length} passed (${(rate * 100).toFixed(1)}%)  model=${model}  prompt=${PROMPT_VERSION}`);
+console.log(`\n${passed}/${main.length} passed (${(rate * 100).toFixed(1)}%)  model=${model}  prompt=${PROMPT_VERSION}  today=${EVAL_TODAY}`);
 if (hard.length) console.log(`hard: ${hard.filter((s) => s.pass).length}/${hard.length} (not gated)`);
 console.log();
 for (const [tag, { pass, total }] of Object.entries(byTag(scores)).sort()) {

@@ -22,4 +22,5 @@ export {
 export { transcribe, mimeTypeFor, DEFAULT_TRANSCRIBE_MODEL, type TranscribeOptions, type TranscribeResult } from './transcribe.js';
 export { checkAudio, checkTranscript, KNOWN_HALLUCINATIONS, MIN_AUDIO_MS, type RejectReason } from './guards.js';
 export { CATEGORIES, PAYMENT_METHODS, ModelOutputSchema, toCents, type Movement, type Category, type PaymentMethod } from './schema.js';
-export { SYSTEM_PROMPT, PROMPT_VERSION } from './prompt.js';
+export { SYSTEM_PROMPT, PROMPT_VERSION, systemPrompt } from './prompt.js';
+export { dateContext, isIsoDate, addDays, daysBetween, utcToday } from './dates.js';

@@ -35,7 +35,7 @@ describe('scoreCase', () => {
   it('passes an exact match', () => {
     const r = scoreCase(c, {
       ok: true,
-      movement: { amount: 30000, category: 'Food', payment_method: 'Cash', description: 'Tacos' },
+      movement: { amount: 30000, category: 'Food', payment_method: 'Cash', description: 'Tacos', date: '2026-11-26' },
     });
     expect(r.pass).toBe(true);
   });
@@ -43,15 +43,23 @@ describe('scoreCase', () => {
   it('lists every field that is wrong', () => {
     const r = scoreCase(c, {
       ok: true,
-      movement: { amount: 300, category: 'Shopping', payment_method: 'Cash', description: 'Tacos' },
+      movement: { amount: 300, category: 'Shopping', payment_method: 'Cash', description: 'Tacos', date: '2026-11-26' },
     });
     expect(r.failures).toEqual(['amount: got 300, want 30000', 'category: got Shopping, want Food']);
+  });
+
+  it("fails an invented date: a case without one expects the eval's today", () => {
+    const r = scoreCase(c, {
+      ok: true,
+      movement: { amount: 30000, category: 'Food', payment_method: 'Cash', description: 'Tacos', date: '2026-11-25' },
+    });
+    expect(r.failures).toEqual(['date: got 2026-11-25, want 2026-11-26']);
   });
 });
 
 describe('confidence scoring', () => {
   const c: EvalCase = { id: 'playa', input: 'ida a la playa 500', tags: [], expect: { amount: 50000, category: 'Travel', payment_method: 'Cash' } };
-  const movement = { amount: 50000, category: 'Transport' as const, payment_method: 'Cash' as const, description: 'Playa' };
+  const movement = { amount: 50000, category: 'Transport' as const, payment_method: 'Cash' as const, description: 'Playa', date: '2026-11-26' };
   const fields = { amount: { p: 0.99 }, category: { p: 0.55 }, payment_method: { p: 0.9 } };
 
   it('marks each field with its probability and correctness', () => {
