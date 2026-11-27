@@ -129,6 +129,16 @@ await parseSpend('ayer comí tacos 120', completer, { today: '2026-11-26' });
   doesn't exist (2026-02-30) is replaced by today; that, a date in the future ("mañana pago el internet"), or one over
   a year old adds `date` to `needs_review`. The date also gets a logprob confidence like the other fields.
 
+First eval with dates (prompt v5, gpt-4o-mini, today = Thursday 2026-11-26):
+- Main set 39/39. None of the 34 cases without a date got an invented one, and the other fields didn't regress (the
+  only change from v4: "regalo para mi mamá" moved from Other to Shopping).
+- Date cases 10/12. "Ayer", "antier", "anoche", "el lunes", "hace tres días", "el 20 pagué 300" (day and amount
+  kept apart), "el 15 de noviembre", and month and year boundaries were all right.
+- "last friday" came back as 2026-11-18 (a Wednesday) at 61% and was flagged. Correct dates scored 97–100%, so the
+  0.8 threshold flags 0/10 correct dates and caught the wrong one.
+- "mañana pago el internet 600" was dated today and not flagged. The calendar only lists past days. Whether a planned
+  payment is an expense at all is a product question (`USER_QUESTIONS.md`), not a prompt fix.
+
 ## The bug that shaped this
 
 In real use, my expense list started showing entries like **"Subtítulos en Amara"**. Nobody said that. When Whisper receives silence or a very short accidental recording, it sometimes "hears" text from its training data, typically subtitle credits like *"Subtítulos realizados por la comunidad de Amara.org"*. The parser then did exactly what it was told and turned that into an expense.
