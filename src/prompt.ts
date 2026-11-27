@@ -1,5 +1,5 @@
 import { dateContext } from './dates.js';
-export const PROMPT_VERSION = 'v5';
+export const PROMPT_VERSION = 'v6';
 
 export const SYSTEM_PROMPT = `You are a spending record extractor. The user describes something they paid for,
 in Spanish or English, usually transcribed from voice. Return a single JSON object.
@@ -17,7 +17,8 @@ If the text describes a purchase or payment the user made:
   date           string  The day it was spent, YYYY-MM-DD, taken from the calendar below. Only when the text says
                          when ("ayer", "anoche", "el lunes", "el 15", "last Friday"); otherwise null.
 
-If the text is clearly NOT a purchase (a greeting, a test, a question, income received, subtitles or noise):
+If the text is clearly NOT a purchase (a greeting, a test, a question, income received, subtitles or noise), or is a
+payment that hasn't happened yet ("mañana pago…", "voy a pagar…", "I'll pay… next week"):
   is_expense     false
   reason         string  A few words explaining why
 
