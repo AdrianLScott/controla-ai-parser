@@ -149,6 +149,26 @@ friday" was right this time, at 57%, so still flagged). Side effects are borderl
 "gym" went to 88% Health (flagged under 0.9) and "regalo para mi mamá" went back to Other. That's 2/41 correct
 categories flagged, inside the 5% budget.
 
+## Trace: keeping the raw evidence
+
+Every result where the model was called carries a `trace`, on success and on rejections alike:
+
+```ts
+interface Trace {
+  prompt_version: string;     // "v5"
+  today: string;              // the date the prompt's calendar was built from
+  model?: string;             // the exact model that answered, e.g. "gpt-4o-mini-2024-07-18"
+  completion: string;         // the raw JSON the model wrote
+  logprobs?: TokenLogprob[];  // every output token, its logprob and its top 5 alternatives
+}
+```
+
+`transcribe` also returns the `model` it used, next to the transcript's `logprobs`.
+
+`confidence` and `needs_review` are one reading of the logprobs, with today's scoring and thresholds. Store the trace
+(and the transcript's logprobs) and you can re-score past notes when the scoring changes, or study real misses
+instead of only eval cases. Guard rejections (silence, known hallucinations) have no trace: no model was called.
+
 ## The bug that shaped this
 
 In real use, my expense list started showing entries like **"Subtítulos en Amara"**. Nobody said that. When Whisper receives silence or a very short accidental recording, it sometimes "hears" text from its training data, typically subtitle credits like *"Subtítulos realizados por la comunidad de Amara.org"*. The parser then did exactly what it was told and turned that into an expense.
@@ -203,7 +223,7 @@ false-alarm side: flag at most 5% of correct fields. It saves the full result to
 
 ```bash
 npm install
-npm test        # 99 tests, offline, no API key needed
+npm test        # 102 tests, offline, no API key needed
 ```
 
 Covers the guards (every known hallucination, empty input, accidental taps), every rejection path in the parser (non-JSON, unknown category, negative amount, `is_expense: false`, guard short-circuits without calling the model), cents rounding, date checks and calendar arithmetic (month and year boundaries), and the eval set's own integrity.
@@ -219,6 +239,7 @@ if (!heard.ok) return heard; // e.g. { ok: false, reason: 'audio_too_short' }
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date()); // YYYY-MM-DD
 const result = await parseSpend(heard.text, openAICompleter(), { transcript: heard.logprobs, today });
 if (result.ok) await save(result.movement, { review: result.needs_review ?? [] });
+await log({ transcript: heard.text, transcriptLogprobs: heard.logprobs, trace: result.trace }); // history, also for rejections
 ```
 
 ## Releasing

@@ -4,6 +4,7 @@ export {
   DEFAULT_REVIEW_BELOW,
   type Completer,
   type Completion,
+  type Trace,
   type ParseResult,
   type ParseOptions,
   type ReviewThresholds,

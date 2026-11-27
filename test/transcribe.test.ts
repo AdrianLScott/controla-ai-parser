@@ -31,7 +31,7 @@ describe('transcribe', () => {
   it('uploads m4a by default (unchanged behavior)', async () => {
     const { client, uploaded } = fakeClient();
     const result = await transcribe(audio, { client });
-    expect(result).toEqual({ ok: true, text: 'tacos 300' });
+    expect(result).toEqual({ ok: true, text: 'tacos 300', model: 'gpt-4o-mini-transcribe' });
     expect(uploaded()?.name).toBe('spend.m4a');
     expect(uploaded()?.type).toBe('audio/m4a');
   });
@@ -58,7 +58,8 @@ describe('transcribe', () => {
 
   it('uses the model it is given', async () => {
     const { client, model } = fakeClient();
-    await transcribe(audio, { client, model: 'whisper-1' });
+    const result = await transcribe(audio, { client, model: 'whisper-1' });
+    expect(result).toMatchObject({ ok: true, model: 'whisper-1' });
     expect(model()).toBe('whisper-1');
   });
 
@@ -81,13 +82,15 @@ describe('transcribe', () => {
     expect(result).toEqual({
       ok: true,
       text: 'tacos 300',
+      model: 'gpt-4o-mini-transcribe',
       logprobs: [{ token: 'tacos', logprob: -0.01, bytes: [116, 97, 99, 111, 115] }, { token: ' 300', logprob: -0.2, bytes: null }],
     });
   });
 
   it('does not ask whisper-1 for logprobs (unsupported)', async () => {
     const { client, request } = fakeClient();
-    await transcribe(audio, { client, model: 'whisper-1' });
+    const result = await transcribe(audio, { client, model: 'whisper-1' });
+    expect(result).toMatchObject({ ok: true, model: 'whisper-1' });
     expect(request()).not.toHaveProperty('include');
   });
 

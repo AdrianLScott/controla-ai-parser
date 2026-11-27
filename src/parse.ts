@@ -8,12 +8,29 @@ import {
 } from './confidence.js';
 import { daysBetween, isIsoDate, utcToday } from './dates.js';
 import { checkTranscript, type RejectReason } from './guards.js';
-import { systemPrompt } from './prompt.js';
+import { PROMPT_VERSION, systemPrompt } from './prompt.js';
 import { ModelOutputSchema, toCents, type Movement } from './schema.js';
 
 /** A model answer, optionally with the logprobs of the tokens it wrote. */
 export interface Completion {
   content: string;
+  logprobs?: TokenLogprob[];
+  /** The exact model that answered (e.g. "gpt-4o-mini-2024-07-18"), for logging. */
+  model?: string;
+}
+
+/**
+ * What the model was given and said, raw, for storing as history. Present whenever the model was called, on success
+ * and on rejections alike: with the logprobs, confidence can be recomputed later with different scoring.
+ */
+export interface Trace {
+  prompt_version: string;
+  /** The `today` the calendar in the prompt was built from. */
+  today: string;
+  model?: string;
+  /** The model's raw output, before parsing. */
+  completion: string;
+  /** Every output token with its logprob and top alternatives, as the API returned them. */
   logprobs?: TokenLogprob[];
 }
 
@@ -37,8 +54,9 @@ export type ParseResult =
       needs_review?: Field[];
       /** The transcription model was unsure of at least one word (see `confidence.transcript.uncertain`). */
       transcript_uncertain?: boolean;
+      trace?: Trace;
     }
-  | { ok: false; reason: RejectReason; detail?: string };
+  | { ok: false; reason: RejectReason; detail?: string; trace?: Trace };
 
 export type ReviewThresholds = Partial<Record<Field | 'transcript' | 'transcript_first_word', number>>;
 
@@ -93,7 +111,7 @@ export function openAICompleter(
       bytes: t.bytes,
       top: t.top_logprobs.map((x) => ({ token: x.token, logprob: x.logprob, bytes: x.bytes })),
     }));
-    return { content: choice?.message?.content ?? '', ...(logprobs ? { logprobs } : {}) };
+    return { content: choice?.message?.content ?? '', ...(logprobs ? { logprobs } : {}), model: completion.model };
   };
 }
 
@@ -110,22 +128,30 @@ export async function parseSpend(text: string, complete: Completer, opts: ParseO
   if (!guard.ok) return guard;
 
   const answer = await complete(systemPrompt(today), guard.text);
-  const { content: raw, logprobs } = typeof answer === 'string' ? { content: answer, logprobs: undefined } : answer;
+  const { content: raw, logprobs, model } =
+    typeof answer === 'string' ? { content: answer, logprobs: undefined, model: undefined } : answer;
+  const trace: Trace = {
+    prompt_version: PROMPT_VERSION,
+    today,
+    ...(model ? { model } : {}),
+    completion: raw,
+    ...(logprobs ? { logprobs } : {}),
+  };
 
   let json: unknown;
   try {
     json = JSON.parse(raw);
   } catch {
-    return { ok: false, reason: 'invalid_json', detail: raw.slice(0, 200) };
+    return { ok: false, reason: 'invalid_json', detail: raw.slice(0, 200), trace };
   }
 
   const result = ModelOutputSchema.safeParse(json);
   if (!result.success) {
-    return { ok: false, reason: 'schema_violation', detail: result.error.issues[0]?.message };
+    return { ok: false, reason: 'schema_violation', detail: result.error.issues[0]?.message, trace };
   }
 
   const out = result.data;
-  if (!out.is_expense) return { ok: false, reason: 'not_an_expense', detail: out.reason };
+  if (!out.is_expense) return { ok: false, reason: 'not_an_expense', detail: out.reason, trace };
 
   const movement: Movement = {
     amount: toCents(out.amount),
@@ -135,9 +161,9 @@ export async function parseSpend(text: string, complete: Completer, opts: ParseO
     date: out.date && isIsoDate(out.date) ? out.date : today,
   };
   // Only money already spent is recorded: a planned payment the model missed is rejected here, deterministically.
-  if (daysBetween(movement.date, today) < 0) return { ok: false, reason: 'future_date', detail: movement.date };
+  if (daysBetween(movement.date, today) < 0) return { ok: false, reason: 'future_date', detail: movement.date, trace };
   const badDate = out.date != null && !isIsoDate(out.date);
-  return { ok: true, movement, ...review(movement, guard.text, raw, logprobs, { ...opts, today, badDate }) };
+  return { ok: true, movement, ...review(movement, guard.text, raw, logprobs, { ...opts, today, badDate }), trace };
 }
 
 /** Confidence and review flags. Only adds keys that have something to say. */

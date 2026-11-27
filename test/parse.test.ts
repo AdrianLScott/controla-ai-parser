@@ -3,6 +3,7 @@ import type OpenAI from 'openai';
 import type { TokenLogprob } from '../src/confidence.js';
 import { openAICompleter, parseSpend, type Completer } from '../src/parse.js';
 import { toCents } from '../src/schema.js';
+import { PROMPT_VERSION } from '../src/prompt.js';
 
 /** A fake model that always answers with `reply`, so tests run offline and deterministically. */
 function fakeModel(reply: unknown) {
@@ -17,6 +18,7 @@ describe('parseSpend', () => {
     expect(result).toEqual({
       ok: true,
       movement: { amount: 2500, category: 'Transport', payment_method: 'Credit', description: 'Uber ride', date: '2026-11-26' },
+      trace: { prompt_version: PROMPT_VERSION, today: '2026-11-26', completion: JSON.stringify(uber) },
     });
   });
 
@@ -47,7 +49,7 @@ describe('parseSpend', () => {
       'hola probando probando',
       fakeModel({ is_expense: false, reason: 'microphone test' }),
     );
-    expect(result).toEqual({ ok: false, reason: 'not_an_expense', detail: 'microphone test' });
+    expect(result).toMatchObject({ ok: false, reason: 'not_an_expense', detail: 'microphone test' });
   });
 });
 
@@ -153,6 +155,7 @@ describe('parseSpend confidence', () => {
 describe('openAICompleter', () => {
   it('asks for logprobs and returns them with the content', async () => {
     const create = vi.fn(async (_req: Record<string, unknown>) => ({
+      model: 'gpt-4o-mini-2024-07-18',
       choices: [
         {
           message: { content: '{"amount":1}' },
@@ -166,6 +169,7 @@ describe('openAICompleter', () => {
     expect(answer).toEqual({
       content: '{"amount":1}',
       logprobs: [{ token: '{"amount":1}', logprob: -0.1, bytes: null, top: [{ token: '{"amount":1}', logprob: -0.1, bytes: null }] }],
+      model: 'gpt-4o-mini-2024-07-18',
     });
   });
 });
@@ -208,7 +212,7 @@ describe('parseSpend dates', () => {
 
   it('rejects a future date: only money already spent is recorded', async () => {
     const result = await parseSpend('mañana pago el internet 600', fakeModel({ ...tacos, date: '2026-11-27' }), { today });
-    expect(result).toEqual({ ok: false, reason: 'future_date', detail: '2026-11-27' });
+    expect(result).toMatchObject({ ok: false, reason: 'future_date', detail: '2026-11-27', trace: { today } });
   });
 
   it('flags dates over a year old', async () => {
@@ -238,5 +242,32 @@ describe('parseSpend dates', () => {
     const result = await parseSpend('tacos 120', withLogprobs({ ...tacos, date: null }, {}), { today });
     if (!result.ok) throw new Error(result.reason);
     expect(result.confidence?.fields).not.toHaveProperty('date');
+  });
+});
+
+describe('parseSpend trace', () => {
+  const today = '2026-11-26';
+  const tacos = { is_expense: true, amount: 120, category: 'Food', payment_method: 'Cash', description: 'Tacos' };
+
+  it('returns the raw output, logprobs and model whenever the model was called', async () => {
+    const logprobs: TokenLogprob[] = [{ token: '{}', logprob: -0.01, top: [{ token: '{}', logprob: -0.01 }] }];
+    const content = JSON.stringify(tacos);
+    const model = vi.fn<Completer>(async () => ({ content, logprobs, model: 'gpt-4o-mini-2024-07-18' }));
+    const result = await parseSpend('tacos 120', model, { today });
+    expect(result.trace).toEqual({ prompt_version: PROMPT_VERSION, today, model: 'gpt-4o-mini-2024-07-18', completion: content, logprobs });
+  });
+
+  it('keeps the trace on rejections made by the model or by validation', async () => {
+    const notExpense = await parseSpend('hola probando', fakeModel({ is_expense: false, reason: 'test' }), { today });
+    expect(notExpense).toMatchObject({ ok: false, trace: { completion: '{"is_expense":false,"reason":"test"}' } });
+    const badJson = await parseSpend('tacos 120', fakeModel('not json'), { today });
+    expect(badJson).toMatchObject({ ok: false, reason: 'invalid_json', trace: { completion: 'not json' } });
+    const badSchema = await parseSpend('tacos 120', fakeModel({ ...tacos, category: 'Groceries' }), { today });
+    expect(badSchema).toMatchObject({ ok: false, reason: 'schema_violation', trace: { today } });
+  });
+
+  it('has no trace when a guard rejected before any model call', async () => {
+    const result = await parseSpend('Subtítulos realizados por la comunidad de Amara.org', fakeModel(tacos), { today });
+    expect(result).toEqual({ ok: false, reason: 'known_hallucination' });
   });
 });
