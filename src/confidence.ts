@@ -23,7 +23,7 @@ export interface TokenLogprob extends TopLogprob {
 }
 
 /** Movement fields a reviewer can be asked about. Maps 1:1 to `Movement` keys. */
-export type Field = 'amount' | 'category' | 'payment_method' | 'description';
+export type Field = 'amount' | 'category' | 'payment_method' | 'description' | 'date';
 export type ScoredField = Field | 'is_expense';
 
 export interface FieldConfidence {
@@ -184,6 +184,7 @@ function alternatives(
  * Per-field confidence for the model's JSON output.
  * - enum fields and `is_expense`: joint probability of the value's tokens, plus alternatives for enums;
  * - `amount`: joint probability of its significant digits (omitted when the amount is 0: that's flagged by rule);
+ * - `date`: joint probability of the whole `YYYY-MM-DD` (omitted when null: no date was said);
  * - `description`: geometric mean, since a joint probability always shrinks as text gets longer.
  */
 export function fieldConfidence(raw: string, tokens: TokenLogprob[]): Confidence['fields'] {
@@ -192,11 +193,12 @@ export function fieldConfidence(raw: string, tokens: TokenLogprob[]): Confidence
   const { aligned, validUntil } = alignTokens(raw, tokens);
   const fields: Confidence['fields'] = {};
 
-  for (const name of ['is_expense', 'amount', 'category', 'payment_method', 'description'] as const) {
+  for (const name of ['is_expense', 'amount', 'category', 'payment_method', 'description', 'date'] as const) {
     const span = spans[name];
     if (!span || span.end > validUntil || span.end <= span.start) continue;
     const valueText = rawBytes.subarray(span.start, span.end).toString('utf8');
     if (name === 'amount' && Number(valueText) === 0) continue;
+    if (name === 'date' && valueText === 'null') continue;
 
     const end = name === 'amount' ? significantEnd(rawBytes, span) : span.end;
     const inside = aligned.filter((t) => t.start < end && t.end > span.start);

@@ -6,8 +6,9 @@ import {
   type Field,
   type TokenLogprob,
 } from './confidence.js';
+import { daysBetween, isIsoDate, utcToday } from './dates.js';
 import { checkTranscript, type RejectReason } from './guards.js';
-import { SYSTEM_PROMPT } from './prompt.js';
+import { systemPrompt } from './prompt.js';
 import { ModelOutputSchema, toCents, type Movement } from './schema.js';
 
 /** A model answer, optionally with the logprobs of the tokens it wrote. */
@@ -29,7 +30,10 @@ export type ParseResult =
       movement: Movement;
       /** Model probabilities per field (and per transcript word), when logprobs were available. */
       confidence?: Confidence;
-      /** Fields worth confirming with the user: low confidence, missing amount, or a shaky transcript. */
+      /**
+       * Fields worth confirming with the user: low confidence, missing amount, a shaky transcript, or a date that is
+       * in the future, over a year old, or not a real day.
+       */
       needs_review?: Field[];
       /** The transcription model was unsure of at least one word (see `confidence.transcript.uncertain`). */
       transcript_uncertain?: boolean;
@@ -48,11 +52,17 @@ export const DEFAULT_REVIEW_BELOW: Readonly<ReviewThresholds> = {
   amount: 0.8,
   category: 0.9,
   payment_method: 0.8,
+  date: 0.8,
   transcript: 0.3,
   transcript_first_word: 0.1,
 };
 
 export interface ParseOptions {
+  /**
+   * The user's local date, `YYYY-MM-DD`, used to resolve "ayer", "el lunes"… and as the date when none is said.
+   * Defaults to the UTC date, which is wrong for part of every day outside UTC, so callers should pass it.
+   */
+  today?: string;
   /** Logprobs from `transcribe`, so mishearings can be flagged. */
   transcript?: TokenLogprob[];
   /** Per-field thresholds, merged over {@link DEFAULT_REVIEW_BELOW}. */
@@ -93,10 +103,13 @@ export function openAICompleter(
  * and claim to be an expense before anything is returned for storage.
  */
 export async function parseSpend(text: string, complete: Completer, opts: ParseOptions = {}): Promise<ParseResult> {
+  const today = opts.today ?? utcToday();
+  if (!isIsoDate(today)) throw new Error(`parseSpend: today must be a YYYY-MM-DD date, got ${JSON.stringify(today)}`);
+
   const guard = checkTranscript(text);
   if (!guard.ok) return guard;
 
-  const answer = await complete(SYSTEM_PROMPT, guard.text);
+  const answer = await complete(systemPrompt(today), guard.text);
   const { content: raw, logprobs } = typeof answer === 'string' ? { content: answer, logprobs: undefined } : answer;
 
   let json: unknown;
@@ -119,12 +132,20 @@ export async function parseSpend(text: string, complete: Completer, opts: ParseO
     category: out.category,
     payment_method: out.payment_method,
     description: out.description,
+    date: out.date && isIsoDate(out.date) ? out.date : today,
   };
-  return { ok: true, movement, ...review(movement, guard.text, raw, logprobs, opts) };
+  const badDate = out.date != null && !isIsoDate(out.date);
+  return { ok: true, movement, ...review(movement, guard.text, raw, logprobs, { ...opts, today, badDate }) };
 }
 
 /** Confidence and review flags. Only adds keys that have something to say. */
-function review(movement: Movement, text: string, raw: string, logprobs: TokenLogprob[] | undefined, opts: ParseOptions) {
+function review(
+  movement: Movement,
+  text: string,
+  raw: string,
+  logprobs: TokenLogprob[] | undefined,
+  opts: ParseOptions & { today: string; badDate: boolean },
+) {
   const below = { ...DEFAULT_REVIEW_BELOW, ...opts.reviewBelow };
   const fields = logprobs ? fieldConfidence(raw, logprobs) : undefined;
   const transcript = opts.transcript
@@ -132,7 +153,7 @@ function review(movement: Movement, text: string, raw: string, logprobs: TokenLo
     : undefined;
   const flagged = new Set<Field>();
 
-  for (const field of ['amount', 'category', 'payment_method', 'description'] as const) {
+  for (const field of ['amount', 'category', 'payment_method', 'description', 'date'] as const) {
     const p = fields?.[field]?.p;
     const threshold = below[field];
     if (p !== undefined && threshold !== undefined && p < threshold) flagged.add(field);
@@ -140,6 +161,9 @@ function review(movement: Movement, text: string, raw: string, logprobs: TokenLo
   if (movement.amount === 0) flagged.add('amount'); // the model found no amount
   // The prompt says "ambiguous → Other", so the model is confident about Other even when it just didn't know.
   if (movement.category === 'Other') flagged.add('category');
+  // Dates are never rejected, only questioned: not a real day (replaced by today), not spent yet, or over a year ago.
+  const age = daysBetween(movement.date, opts.today);
+  if (opts.badDate || age < 0 || age > 366) flagged.add('date');
 
   const shaky = transcript !== undefined && transcript.uncertain.length > 0;
   if (shaky) {

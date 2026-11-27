@@ -1,5 +1,5 @@
 import type { ParseResult } from '../src/parse.js';
-import type { EvalCase } from './cases.js';
+import { todayFor, type EvalCase } from './cases.js';
 
 export interface CaseScore {
   id: string;
@@ -23,6 +23,8 @@ export function scoreCase(c: EvalCase, result: ParseResult): CaseScore {
     if (got.category !== want.category) failures.push(`category: got ${got.category}, want ${want.category}`);
     if (got.payment_method !== want.payment_method)
       failures.push(`payment_method: got ${got.payment_method}, want ${want.payment_method}`);
+    const date = want.date ?? todayFor(c);
+    if (got.date !== date) failures.push(`date: got ${got.date}, want ${date}`);
   }
 
   return { id: c.id, pass: failures.length === 0, failures, tags: c.tags };
@@ -42,7 +44,7 @@ export function byTag(scores: CaseScore[]): Record<string, { pass: number; total
 }
 
 /** Fields whose confidence the eval can check against an expected value. */
-export const CHECKED_FIELDS = ['amount', 'category', 'payment_method'] as const;
+export const CHECKED_FIELDS = ['amount', 'category', 'payment_method', 'date'] as const;
 export type CheckedField = (typeof CHECKED_FIELDS)[number];
 
 export interface FieldInstance {
@@ -62,7 +64,8 @@ export function fieldInstances(c: EvalCase, result: ParseResult): FieldInstance[
   for (const field of CHECKED_FIELDS) {
     const p = result.confidence.fields[field]?.p;
     if (p === undefined) continue;
-    out.push({ id: c.id, field, value: String(got[field]), p, correct: got[field] === want[field] });
+    const expected = field === 'date' ? (want.date ?? todayFor(c)) : want[field];
+    out.push({ id: c.id, field, value: String(got[field]), p, correct: got[field] === expected });
   }
   return out;
 }

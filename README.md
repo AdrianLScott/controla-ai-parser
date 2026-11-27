@@ -5,7 +5,7 @@ Turns a spoken or typed expense into a validated record:
 ```
 "gasté 180 en hamburguesas en efectivo"
         ↓
-{ amount: 18000, category: "Food", payment_method: "Cash", description: "Hamburguesas" }
+{ amount: 18000, category: "Food", payment_method: "Cash", description: "Hamburguesas", date: "2026-11-26" }
 ```
 
 This is the AI core of **Controla**, a personal finance app I'm building where you tap a home-screen widget, say what you spent, and it's logged. The app itself is private; this module is extracted so the interesting part can be read, run and tested on its own.
@@ -107,6 +107,28 @@ Limits: logprobs aren't calibrated probabilities (0.62 doesn't mean "right 62% o
 from 44 text cases and 35 synthetic (text-to-speech) clips, not real recordings. A payment method the user never said
 is defaulted to Cash by the prompt, and the model is confident about that default, so it isn't flagged.
 
+## Dates: "ayer", "el lunes", "el 15"
+
+Every movement has a `date` (`YYYY-MM-DD`): the day the money was spent, not when it was logged.
+
+```ts
+interface Movement { amount: number; category: Category; payment_method: PaymentMethod; description: string; date: string }
+
+await parseSpend('ayer comí tacos 120', completer, { today: '2026-11-26' });
+// → movement.date === '2026-11-25'
+```
+
+- **The caller says what "today" is.** The parser has no clock or time zone of its own; `today` is the user's local
+  date. It defaults to the UTC date, which is wrong for part of every day outside UTC (in Mexico, UTC is already
+  tomorrow from 6 pm), so a server should always pass it.
+- **The model looks dates up instead of counting.** The system prompt gets a small calendar: today and the previous
+  week, each with its weekday in Spanish and English ("2026-11-23  lunes / Monday"). Small models are unreliable at
+  "which date was last Monday?" but fine at finding "lunes" in a list.
+- **No date said → `null` → today.** That's the common case, so it costs no tokens and has no confidence to score.
+- **Checked, never rejected.** A malformed date is a schema violation, like any other off-contract output. A date that
+  doesn't exist (2026-02-30) is replaced by today; that, a date in the future ("mañana pago el internet"), or one over
+  a year old adds `date` to `needs_review`. The date also gets a logprob confidence like the other fields.
+
 ## The bug that shaped this
 
 In real use, my expense list started showing entries like **"Subtítulos en Amara"**. Nobody said that. When Whisper receives silence or a very short accidental recording, it sometimes "hears" text from its training data, typically subtitle credits like *"Subtítulos realizados por la comunidad de Amara.org"*. The parser then did exactly what it was told and turned that into an expense.
@@ -125,12 +147,13 @@ The fix is three layers, cheapest first:
 | **Money as integer cents** | `19.99 * 100` is `1998.9999…` in floating point. Rounding once at the boundary keeps every stored amount exact. |
 | **`temperature: 0` + `response_format: json_object`** | Same input, same record. JSON mode removes a whole class of "Sure! Here's your JSON:" failures. |
 | **Model behind a `Completer` function** | `(system, user) => Promise<string>`. Tests use a fake, so they run offline in milliseconds, and swapping models doesn't touch parsing. |
+| **"Today" is an input** | Relative dates depend on the user's calendar, not the server's. Passing `today` keeps the parser pure and its evals reproducible (they run on a fixed Thursday). |
 | **Defaults instead of follow-up questions** | No payment method → `Cash`; unclear category → `Other`. Logging has to take seconds, so the record is saved and can be corrected later. |
 | **AI stays on the server** | In Controla the app only sends audio or text. Keys never ship in the bundle and the model can change without an app release. |
 
 ## Evals
 
-[`evals/cases.json`](evals/cases.json) holds 44 cases in Spanish and English, tagged by what they test:
+[`evals/cases.json`](evals/cases.json) holds 56 cases in Spanish and English, tagged by what they test:
 
 | Tag | What it checks | Example |
 |---|---|---|
@@ -141,6 +164,7 @@ The fix is three layers, cheapest first:
 | `ambiguous` | Cases where a human could disagree | "gas for the car" vs "recibo del gas" |
 | `hallucination` | Whisper subtitle artifacts | "Subtítulos realizados por la comunidad de Amara.org" |
 | `not-expense` | Text that must not become a record | "hola, probando, probando", "me pagaron 5000" |
+| `date` | Relative and explicit dates, against a fixed "today" (Thursday 2026-11-26) | "el lunes pagué la luz 450" → 2026-11-23 |
 | `hard` | Ambiguous or misheard input, reported separately and not gated | "gasolina del viaje a guadalajara 900", "Tuve lipis doscientos treinta" |
 
 ```bash
@@ -149,7 +173,8 @@ npm run eval                                    # gpt-4o-mini, fails under 90%
 npm run eval -- --model gpt-4.1-mini --min 0.95  # compare another model
 ```
 
-Each run prints pass/fail per case with the exact field that was wrong, a pass rate per tag, and a confidence
+Every case also checks the date: a case without an expected date must come back as today, so an invented date
+fails. Each run prints pass/fail per case with the exact field that was wrong, a pass rate per tag, and a confidence
 report: per field, the lowest-probability values marked right or wrong, and how many correct values (false alarms) and
 wrong values (caught) each threshold would flag. Wrong values are few, so default thresholds are chosen from the
 false-alarm side: flag at most 5% of correct fields. It saves the full result to `evals/results/` so runs can be compared before and after a prompt change. The `ambiguous` cases are there on purpose: they document the decision I made, and if a model disagrees I want to see it, not hide it.
@@ -158,10 +183,10 @@ false-alarm side: flag at most 5% of correct fields. It saves the full result to
 
 ```bash
 npm install
-npm test        # 82 tests, offline, no API key needed
+npm test        # 98 tests, offline, no API key needed
 ```
 
-Covers the guards (every known hallucination, empty input, accidental taps), every rejection path in the parser (non-JSON, unknown category, negative amount, `is_expense: false`, guard short-circuits without calling the model), cents rounding, and the eval set's own integrity.
+Covers the guards (every known hallucination, empty input, accidental taps), every rejection path in the parser (non-JSON, unknown category, negative amount, `is_expense: false`, guard short-circuits without calling the model), cents rounding, date checks and calendar arithmetic (month and year boundaries), and the eval set's own integrity.
 
 ## Use
 
@@ -171,7 +196,8 @@ import { transcribe, parseSpend, openAICompleter } from 'controla-ai-parser';
 const heard = await transcribe(audioBuffer, { durationMs: 2400, language: 'es' });
 if (!heard.ok) return heard; // e.g. { ok: false, reason: 'audio_too_short' }
 
-const result = await parseSpend(heard.text, openAICompleter(), { transcript: heard.logprobs });
+const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date()); // YYYY-MM-DD
+const result = await parseSpend(heard.text, openAICompleter(), { transcript: heard.logprobs, today });
 if (result.ok) await save(result.movement, { review: result.needs_review ?? [] });
 ```
 

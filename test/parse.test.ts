@@ -13,10 +13,10 @@ const uber = { is_expense: true, amount: 25, category: 'Transport', payment_meth
 
 describe('parseSpend', () => {
   it('returns a validated movement with the amount in cents', async () => {
-    const result = await parseSpend('spent 25 on uber with credit', fakeModel(uber));
+    const result = await parseSpend('spent 25 on uber with credit', fakeModel(uber), { today: '2026-11-26' });
     expect(result).toEqual({
       ok: true,
-      movement: { amount: 2500, category: 'Transport', payment_method: 'Credit', description: 'Uber ride' },
+      movement: { amount: 2500, category: 'Transport', payment_method: 'Credit', description: 'Uber ride', date: '2026-11-26' },
     });
   });
 
@@ -178,5 +178,62 @@ describe('toCents', () => {
     [0, 0],
   ])('%d -> %d', (amount, cents) => {
     expect(toCents(amount)).toBe(cents);
+  });
+});
+
+describe('parseSpend dates', () => {
+  const today = '2026-11-26';
+  const tacos = { is_expense: true, amount: 120, category: 'Food', payment_method: 'Cash', description: 'Tacos' };
+
+  it('uses today when no date was said', async () => {
+    for (const date of [undefined, null]) {
+      const result = await parseSpend('tacos 120', fakeModel({ ...tacos, date }), { today });
+      expect(result).toMatchObject({ ok: true, movement: { date: today } });
+      expect(result).not.toHaveProperty('needs_review');
+    }
+  });
+
+  it("keeps the model's date and sends it the calendar", async () => {
+    const model = fakeModel({ ...tacos, date: '2026-11-25' });
+    const result = await parseSpend('ayer tacos 120', model, { today });
+    expect(result).toMatchObject({ ok: true, movement: { date: '2026-11-25' } });
+    expect(result).not.toHaveProperty('needs_review');
+    expect(model.mock.calls[0]![0]).toContain('2026-11-25  miércoles / Wednesday  (ayer / yesterday)');
+  });
+
+  it('replaces a day that does not exist with today, and flags it', async () => {
+    const result = await parseSpend('tacos 120', fakeModel({ ...tacos, date: '2026-02-30' }), { today });
+    expect(result).toMatchObject({ ok: true, movement: { date: today }, needs_review: ['date'] });
+  });
+
+  it('flags future dates and dates over a year old', async () => {
+    for (const date of ['2026-11-27', '2025-11-24']) {
+      const result = await parseSpend('tacos 120', fakeModel({ ...tacos, date }), { today });
+      expect(result).toMatchObject({ ok: true, movement: { date }, needs_review: ['date'] });
+    }
+    const lastYear = await parseSpend('tacos 120', fakeModel({ ...tacos, date: '2025-11-26' }), { today });
+    expect(lastYear).not.toHaveProperty('needs_review');
+  });
+
+  it('rejects a malformed date as a schema violation', async () => {
+    const result = await parseSpend('tacos 120', fakeModel({ ...tacos, date: 'ayer' }), { today });
+    expect(result).toMatchObject({ ok: false, reason: 'schema_violation' });
+  });
+
+  it('throws on an invalid today (a caller bug)', async () => {
+    await expect(parseSpend('tacos 120', fakeModel(tacos), { today: '26/11/2026' })).rejects.toThrow(/today/);
+  });
+
+  it('scores the date and flags an unsure one', async () => {
+    const result = await parseSpend('el lunes tacos 120', withLogprobs({ ...tacos, date: '2026-11-23' }, { date: 0.55 }), { today });
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.confidence?.fields.date?.p).toBeCloseTo(0.55);
+    expect(result.needs_review).toEqual(['date']);
+  });
+
+  it('gives no date confidence when the date is null', async () => {
+    const result = await parseSpend('tacos 120', withLogprobs({ ...tacos, date: null }, {}), { today });
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.confidence?.fields).not.toHaveProperty('date');
   });
 });
