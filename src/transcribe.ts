@@ -9,7 +9,16 @@ import { checkAudio, type RejectReason } from './guards.js';
 export const DEFAULT_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe';
 
 /** The transcript, plus per-token logprobs when the model provides them (gpt-4o-*-transcribe; not whisper-1). */
-export type TranscribeResult = { ok: true; text: string; logprobs?: TokenLogprob[] } | { ok: false; reason: RejectReason };
+export type TranscribeResult =
+  | {
+      ok: true;
+      text: string;
+      /** Per-token logprobs (gpt-4o-*-transcribe only): no `top` alternatives, the API doesn't return them. */
+      logprobs?: TokenLogprob[];
+      /** The model that was asked to transcribe, for logging. */
+      model: string;
+    }
+  | { ok: false; reason: RejectReason };
 
 /** Models that can return logprobs for the transcript. */
 const supportsLogprobs = (model: string) => /^gpt-4o.*transcribe/.test(model);
@@ -72,5 +81,5 @@ export async function transcribe(audio: Buffer, opts: TranscribeOptions = {}): P
   const logprobs = result.logprobs
     ?.filter((t) => t.token !== undefined && t.logprob !== undefined)
     .map((t) => ({ token: t.token!, logprob: t.logprob!, bytes: t.bytes ?? null }));
-  return { ok: true, text: result.text, ...(logprobs?.length ? { logprobs } : {}) };
+  return { ok: true, text: result.text, model, ...(logprobs?.length ? { logprobs } : {}) };
 }
