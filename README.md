@@ -26,7 +26,7 @@ Every arrow can say **no**. A rejection is a normal result with a reason, not an
 type ParseResult =
   | { ok: true; movement: Movement; confidence?: Confidence; needs_review?: Field[]; transcript_uncertain?: boolean }
   | { ok: false; reason: 'audio_too_short' | 'empty_transcript' | 'known_hallucination' | 'too_short'
-                       | 'invalid_json' | 'schema_violation' | 'not_an_expense'; detail?: string };
+                       | 'invalid_json' | 'schema_violation' | 'not_an_expense' | 'future_date'; detail?: string };
 ```
 
 ## Choosing the transcription model
@@ -125,9 +125,12 @@ await parseSpend('ayer comí tacos 120', completer, { today: '2026-11-26' });
   week, each with its weekday in Spanish and English ("2026-11-23  lunes / Monday"). Small models are unreliable at
   "which date was last Monday?" but fine at finding "lunes" in a list.
 - **No date said → `null` → today.** That's the common case, so it costs no tokens and has no confidence to score.
-- **Checked, never rejected.** A malformed date is a schema violation, like any other off-contract output. A date that
-  doesn't exist (2026-02-30) is replaced by today; that, a date in the future ("mañana pago el internet"), or one over
-  a year old adds `date` to `needs_review`. The date also gets a logprob confidence like the other fields.
+- **Only money already spent.** A planned payment ("mañana pago el internet", "voy a pagar la renta") is not an
+  expense: the prompt says so, and any date after `today` that slips through is rejected in code with
+  `reason: 'future_date'`.
+- **Past dates are checked, not rejected.** A malformed date is a schema violation, like any other off-contract
+  output. A date that doesn't exist (2026-02-30) is replaced by today; that, or one over a year old, adds `date` to
+  `needs_review`. The date also gets a logprob confidence like the other fields.
 
 First eval with dates (prompt v5, gpt-4o-mini, today = Thursday 2026-11-26):
 - Main set 39/39. None of the 34 cases without a date got an invented one, and the other fields didn't regress (the
@@ -136,8 +139,15 @@ First eval with dates (prompt v5, gpt-4o-mini, today = Thursday 2026-11-26):
   kept apart), "el 15 de noviembre", and month and year boundaries were all right.
 - "last friday" came back as 2026-11-18 (a Wednesday) at 61% and was flagged. Correct dates scored 97–100%, so the
   0.8 threshold flags 0/10 correct dates and caught the wrong one.
-- "mañana pago el internet 600" was dated today and not flagged. The calendar only lists past days. Whether a planned
-  payment is an expense at all is a product question (`USER_QUESTIONS.md`), not a prompt fix.
+- "mañana pago el internet 600" was dated today and not flagged. Decision: planned payments aren't recorded. Prompt v6
+  rejects them, and a code guard rejects any future date (see below).
+
+Prompt v6 (planned payments): main set 41/41. Both planned payments ("mañana pago el internet", "voy a pagar la renta
+mañana") were rejected by the model itself ("Payment not yet made"), so the `future_date` guard didn't have to fire.
+The control "ayer pagué el internet 600" passed, real non-expenses stayed rejected, and date cases were 14/14 ("last
+friday" was right this time, at 57%, so still flagged). Side effects are borderline categories moving a little:
+"gym" went to 88% Health (flagged under 0.9) and "regalo para mi mamá" went back to Other. That's 2/41 correct
+categories flagged, inside the 5% budget.
 
 ## Trace: keeping the raw evidence
 
@@ -213,7 +223,7 @@ false-alarm side: flag at most 5% of correct fields. It saves the full result to
 
 ```bash
 npm install
-npm test        # 101 tests, offline, no API key needed
+npm test        # 102 tests, offline, no API key needed
 ```
 
 Covers the guards (every known hallucination, empty input, accidental taps), every rejection path in the parser (non-JSON, unknown category, negative amount, `is_expense: false`, guard short-circuits without calling the model), cents rounding, date checks and calendar arithmetic (month and year boundaries), and the eval set's own integrity.

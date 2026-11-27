@@ -13,7 +13,8 @@ export type RejectReason =
   | 'too_short'
   | 'invalid_json'
   | 'schema_violation'
-  | 'not_an_expense';
+  | 'not_an_expense'
+  | 'future_date';
 
 export type GuardResult = { ok: true; text: string } | { ok: false; reason: RejectReason };
 

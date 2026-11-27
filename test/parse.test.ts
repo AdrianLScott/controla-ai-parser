@@ -210,11 +210,14 @@ describe('parseSpend dates', () => {
     expect(result).toMatchObject({ ok: true, movement: { date: today }, needs_review: ['date'] });
   });
 
-  it('flags future dates and dates over a year old', async () => {
-    for (const date of ['2026-11-27', '2025-11-24']) {
-      const result = await parseSpend('tacos 120', fakeModel({ ...tacos, date }), { today });
-      expect(result).toMatchObject({ ok: true, movement: { date }, needs_review: ['date'] });
-    }
+  it('rejects a future date: only money already spent is recorded', async () => {
+    const result = await parseSpend('mañana pago el internet 600', fakeModel({ ...tacos, date: '2026-11-27' }), { today });
+    expect(result).toMatchObject({ ok: false, reason: 'future_date', detail: '2026-11-27', trace: { today } });
+  });
+
+  it('flags dates over a year old', async () => {
+    const result = await parseSpend('tacos 120', fakeModel({ ...tacos, date: '2025-11-24' }), { today });
+    expect(result).toMatchObject({ ok: true, movement: { date: '2025-11-24' }, needs_review: ['date'] });
     const lastYear = await parseSpend('tacos 120', fakeModel({ ...tacos, date: '2025-11-26' }), { today });
     expect(lastYear).not.toHaveProperty('needs_review');
   });

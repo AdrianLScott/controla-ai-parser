@@ -49,7 +49,7 @@ export type ParseResult =
       confidence?: Confidence;
       /**
        * Fields worth confirming with the user: low confidence, missing amount, a shaky transcript, or a date that is
-       * in the future, over a year old, or not a real day.
+       * over a year old or not a real day.
        */
       needs_review?: Field[];
       /** The transcription model was unsure of at least one word (see `confidence.transcript.uncertain`). */
@@ -160,6 +160,8 @@ export async function parseSpend(text: string, complete: Completer, opts: ParseO
     description: out.description,
     date: out.date && isIsoDate(out.date) ? out.date : today,
   };
+  // Only money already spent is recorded: a planned payment the model missed is rejected here, deterministically.
+  if (daysBetween(movement.date, today) < 0) return { ok: false, reason: 'future_date', detail: movement.date, trace };
   const badDate = out.date != null && !isIsoDate(out.date);
   return { ok: true, movement, ...review(movement, guard.text, raw, logprobs, { ...opts, today, badDate }), trace };
 }
@@ -187,9 +189,8 @@ function review(
   if (movement.amount === 0) flagged.add('amount'); // the model found no amount
   // The prompt says "ambiguous → Other", so the model is confident about Other even when it just didn't know.
   if (movement.category === 'Other') flagged.add('category');
-  // Dates are never rejected, only questioned: not a real day (replaced by today), not spent yet, or over a year ago.
-  const age = daysBetween(movement.date, opts.today);
-  if (opts.badDate || age < 0 || age > 366) flagged.add('date');
+  // Past dates are questioned, not rejected: not a real day (replaced by today), or over a year ago.
+  if (opts.badDate || daysBetween(movement.date, opts.today) > 366) flagged.add('date');
 
   const shaky = transcript !== undefined && transcript.uncertain.length > 0;
   if (shaky) {
